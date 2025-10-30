@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Floating Movable Iframe</title>
+<style>
+  /* Container for the floating iframe */
+  #iframeContainer {
+    position: fixed;
+    top: 50px;
+    left: 50px;
+    width: 600px;
+    height: 400px;
+    background: #fff;
+    border: 2px solid #444;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 9999;
+    resize: both;
+    overflow: hidden;
+    display: none;
+  }
+
+  /* Header bar for dragging */
+  #iframeHeader {
+    position: relative;
+    background: #444;
+    color: white;
+    padding: 8px 12px;
+    font-weight: bold;
+    cursor: move;
+    user-select: none;
+  }
+
+  /* Close button in the upper right corner */
+  #closeBtn {
+    position: absolute;
+    right: 10px;
+    top: 6px;
+    cursor: pointer;
+    font-size: 18px;
+    color: white;
+    font-weight: bold;
+    transition: color 0.2s;
+  }
+  #closeBtn:hover {
+    color: #ff5555;
+  }
+
+  /* The iframe itself */
+  #floatingIframe {
+    width: 100%;
+    height: calc(100% - 32px);
+    border: none;
+  }
+
+  /* Demo button */
+  button {
+    margin: 20px;
+    padding: 8px 16px;
+  }
+</style>
+</head>
+<body>
+
+<button onclick="openFloatingIframe('https://example.com')">Open Iframe</button>
+
+<div id="iframeContainer">
+  <div id="iframeHeader">
+    Floating Iframe
+    <span id="closeBtn" onclick="closeIframe()">✕</span>
+  </div>
+  <iframe id="floatingIframe"></iframe>
+</div>
+
+<script>
+function openFloatingIframe(url) {
+  const container = document.getElementById('iframeContainer');
+  const iframe = document.getElementById('floatingIframe');
+  iframe.src = url;
+  container.style.display = 'block';
+}
+
+function closeIframe() {
+  const container = document.getElementById('iframeContainer');
+  const iframe = document.getElementById('floatingIframe');
+  iframe.src = ''; // optional: unload page
+  container.style.display = 'none';
+}
+
+// --- Dragging behavior ---
+(function() {
+  const container = document.getElementById('iframeContainer');
+  const header = document.getElementById('iframeHeader');
+  let offsetX = 0, offsetY = 0, isDragging = false;
+
+  header.addEventListener('mousedown', function(e) {
+    isDragging = true;
+    offsetX = container.offsetLeft - e.clientX;
+    offsetY = container.offsetTop - e.clientY;
+  });
+
+  document.addEventListener('mouseup', () => isDragging = false);
+  document.addEventListener('mousemove', function(e) {
+    if (isDragging) {
+      container.style.left = e.clientX + offsetX + 'px';
+      container.style.top = e.clientY + offsetY + 'px';
+    }
+  });
+})();
+</script>
+
+</body>
+</html>
