@@ -3,9 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Floating Movable Iframe</title>
+<title>Locked Floating Iframe</title>
 <style>
-  /* Container for the floating iframe */
   #iframeContainer {
     position: fixed;
     top: 50px;
@@ -14,14 +13,12 @@
     height: 400px;
     background: #fff;
     border: 2px solid #444;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     z-index: 9999;
-    resize: both;
     overflow: hidden;
     display: none;
   }
 
-  /* Header bar for dragging */
   #iframeHeader {
     position: relative;
     background: #444;
@@ -32,7 +29,6 @@
     user-select: none;
   }
 
-  /* Close button in the upper right corner */
   #closeBtn {
     position: absolute;
     right: 10px;
@@ -47,18 +43,26 @@
     color: #ff5555;
   }
 
-  /* The iframe itself */
   #floatingIframe {
     width: 100%;
     height: calc(100% - 32px);
     border: none;
   }
 
-  /* Demo button */
-  button {
-    margin: 20px;
-    padding: 8px 16px;
+  /* Resize handles */
+  .resize-handle {
+    position: absolute;
+    background: transparent;
+    z-index: 10000;
   }
+  .resize-handle.n { top: -4px; left: 0; width: 100%; height: 8px; cursor: n-resize; }
+  .resize-handle.s { bottom: -4px; left: 0; width: 100%; height: 8px; cursor: s-resize; }
+  .resize-handle.e { top: 0; right: -4px; width: 8px; height: 100%; cursor: e-resize; }
+  .resize-handle.w { top: 0; left: -4px; width: 8px; height: 100%; cursor: w-resize; }
+  .resize-handle.nw { top: -4px; left: -4px; width: 10px; height: 10px; cursor: nw-resize; }
+  .resize-handle.ne { top: -4px; right: -4px; width: 10px; height: 10px; cursor: ne-resize; }
+  .resize-handle.sw { bottom: -4px; left: -4px; width: 10px; height: 10px; cursor: sw-resize; }
+  .resize-handle.se { bottom: -4px; right: -4px; width: 10px; height: 10px; cursor: se-resize; }
 </style>
 </head>
 <body>
@@ -71,6 +75,16 @@
     <span id="closeBtn" onclick="closeIframe()">✕</span>
   </div>
   <iframe id="floatingIframe"></iframe>
+
+  <!-- Resize handles -->
+  <div class="resize-handle n"></div>
+  <div class="resize-handle s"></div>
+  <div class="resize-handle e"></div>
+  <div class="resize-handle w"></div>
+  <div class="resize-handle nw"></div>
+  <div class="resize-handle ne"></div>
+  <div class="resize-handle sw"></div>
+  <div class="resize-handle se"></div>
 </div>
 
 <script>
@@ -84,11 +98,11 @@ function openFloatingIframe(url) {
 function closeIframe() {
   const container = document.getElementById('iframeContainer');
   const iframe = document.getElementById('floatingIframe');
-  iframe.src = ''; // optional: unload page
+  iframe.src = '';
   container.style.display = 'none';
 }
 
-// --- Dragging behavior ---
+// --- Dragging logic with window lock ---
 (function() {
   const container = document.getElementById('iframeContainer');
   const header = document.getElementById('iframeHeader');
@@ -96,16 +110,89 @@ function closeIframe() {
 
   header.addEventListener('mousedown', function(e) {
     isDragging = true;
-    offsetX = container.offsetLeft - e.clientX;
-    offsetY = container.offsetTop - e.clientY;
+    offsetX = e.clientX - container.offsetLeft;
+    offsetY = e.clientY - container.offsetTop;
+    document.body.style.userSelect = 'none';
   });
 
-  document.addEventListener('mouseup', () => isDragging = false);
+  document.addEventListener('mouseup', () => {
+    isDragging = false;
+    document.body.style.userSelect = '';
+  });
+
   document.addEventListener('mousemove', function(e) {
     if (isDragging) {
-      container.style.left = e.clientX + offsetX + 'px';
-      container.style.top = e.clientY + offsetY + 'px';
+      let newLeft = e.clientX - offsetX;
+      let newTop = e.clientY - offsetY;
+
+      // Lock within viewport
+      const maxLeft = window.innerWidth - container.offsetWidth;
+      const maxTop = window.innerHeight - container.offsetHeight;
+      newLeft = Math.min(Math.max(0, newLeft), maxLeft);
+      newTop = Math.min(Math.max(0, newTop), maxTop);
+
+      container.style.left = newLeft + 'px';
+      container.style.top = newTop + 'px';
     }
+  });
+})();
+
+// --- Resizing logic with viewport lock ---
+(function() {
+  const container = document.getElementById('iframeContainer');
+  let isResizing = false, handle = null, startX, startY, startW, startH, startL, startT;
+
+  document.querySelectorAll('.resize-handle').forEach(h => {
+    h.addEventListener('mousedown', e => {
+      e.preventDefault();
+      isResizing = true;
+      handle = h.classList[1];
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = container.getBoundingClientRect();
+      startW = rect.width;
+      startH = rect.height;
+      startL = rect.left;
+      startT = rect.top;
+      document.body.style.userSelect = 'none';
+    });
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!isResizing) return;
+    let dx = e.clientX - startX;
+    let dy = e.clientY - startY;
+    let newWidth = startW;
+    let newHeight = startH;
+    let newLeft = startL;
+    let newTop = startT;
+
+    if (handle.includes('e')) newWidth = startW + dx;
+    if (handle.includes('s')) newHeight = startH + dy;
+    if (handle.includes('w')) { newWidth = startW - dx; newLeft = startL + dx; }
+    if (handle.includes('n')) { newHeight = startH - dy; newTop = startT + dy; }
+
+    // Constrain size
+    const minWidth = 200, minHeight = 150;
+    newWidth = Math.max(minWidth, newWidth);
+    newHeight = Math.max(minHeight, newHeight);
+
+    // Lock inside window bounds
+    const maxLeft = window.innerWidth - newWidth;
+    const maxTop = window.innerHeight - newHeight;
+    newLeft = Math.min(Math.max(0, newLeft), maxLeft);
+    newTop = Math.min(Math.max(0, newTop), maxTop);
+
+    // Apply new styles
+    container.style.width = newWidth + 'px';
+    container.style.height = newHeight + 'px';
+    container.style.left = newLeft + 'px';
+    container.style.top = newTop + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    isResizing = false;
+    document.body.style.userSelect = '';
   });
 })();
 </script>
