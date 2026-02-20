@@ -1,0 +1,31 @@
+export default async function determineBackendUrl(): Promise<string> {
+  const isLocalConfig = import.meta.env.VITE_LOCAL_CONFIG === 'true';
+  console.log('check isLocalConfig env:', isLocalConfig);
+
+  let backendIp: string;
+
+  if (isLocalConfig) {
+    const localConfigModule = await import('../config/local/config.json');
+    backendIp = localConfigModule.default.backendIp;
+
+    console.log(
+      'local config detected, connecting to backend ip:',
+      backendIp
+    );
+  } else {
+    const response = await fetch('/config.json');
+    if (!response.ok) {
+      throw new Error('Failed to load runtime config.json');
+    }
+
+    const runtimeConfig = await response.json();
+    backendIp = runtimeConfig.backendIp;
+
+    console.log(
+      'non local docker config detected, connecting to backend ip:',
+      backendIp
+    );
+  }
+
+  return backendIp;
+}
