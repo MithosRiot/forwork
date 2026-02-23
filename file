@@ -1,31 +1,42 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import apiConnect from "../util/apiConnect";
 import determineBackendUrl from "../util/determineBackendUrl";
 
-describe("determineBackendUrl", () => {
+vi.mock("../util/determineBackendUrl", () => ({
+  default: vi.fn(),
+}));
+
+describe("apiConnect", () => {
   beforeEach(() => {
-    delete (window as any).__RUNTIME_ENV__;
-    vi.unstubAllEnvs();
+    vi.clearAllMocks();
   });
 
-  it("returns runtime BACKEND_URL when provided", () => {
-    (window as any).__RUNTIME_ENV__ = { BACKEND_URL: "http://localhost:8080" };
+  it("sends the correct payload and returns data correctly", async () => {
+    const mockResponse = {
+      message: ["hello"],
+      renderHtml: false,
+      reply: { text: "ok" },
+      responseRequired: [],
+      userInputRequired: false,
+    };
 
-    const result = determineBackendUrl();
+    (determineBackendUrl as unknown as ReturnType<typeof vi.fn>).mockReturnValue("http://localhost:8080/");
+    global.fetch = vi.fn().mockResolvedValue({
+      json: vi.fn().mockResolvedValue(mockResponse),
+    } as any);
 
-    expect(result).toBe("http://localhost:8080/");
-  });
+    const result = await apiConnect("Hello World", "mock-session");
 
-  it("falls back to VITE_BACKEND_URL when runtime value is missing", () => {
-    vi.stubEnv("VITE_BACKEND_URL", "http://production-api");
-
-    const result = determineBackendUrl();
-
-    expect(result).toBe("http://production-api/");
-  });
-
-  it("falls back to BASE_URL + api/assistant when no runtime/env override", () => {
-    const result = determineBackendUrl();
-
-    expect(result.endsWith("api/assistant/")).toBe(true);
+    expect(determineBackendUrl).toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith("http://localhost:8080/chatbot", {
+      method: "POST",
+      headers: expect.any(Headers),
+      body: JSON.stringify({
+        type: "chat",
+        msg: "Hello World",
+        sessionId: "mock-session",
+      }),
+    });
+    expect(result).toEqual(mockResponse);
   });
 });
