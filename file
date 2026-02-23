@@ -1,42 +1,37 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import apiConnect from "../util/apiConnect";
+import apiConnectIndex from "../util/apiConnectIndex";
 import determineBackendUrl from "../util/determineBackendUrl";
 
 vi.mock("../util/determineBackendUrl", () => ({
   default: vi.fn(),
 }));
 
-describe("apiConnect", () => {
+describe("apiConnectIndex", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("sends the correct payload and returns data correctly", async () => {
-    const mockResponse = {
-      message: ["hello"],
-      renderHtml: false,
-      reply: { text: "ok" },
-      responseRequired: [],
-      userInputRequired: false,
-    };
+  it("successfully fetches and returns correctly", async () => {
+    const mockReply = "indexed";
 
     (determineBackendUrl as unknown as ReturnType<typeof vi.fn>).mockReturnValue("http://localhost:8080/");
     global.fetch = vi.fn().mockResolvedValue({
-      json: vi.fn().mockResolvedValue(mockResponse),
+      json: vi.fn().mockResolvedValue({ reply: mockReply }),
     } as any);
 
-    const result = await apiConnect("Hello World", "mock-session");
+    const result = await apiConnectIndex("test", "mock-session");
 
-    expect(determineBackendUrl).toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledWith("http://localhost:8080/chatbot", {
+    expect(fetch).toHaveBeenCalledWith("http://localhost:8080/index", {
       method: "POST",
-      headers: expect.any(Headers),
+      headers: {
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
-        type: "chat",
-        msg: "Hello World",
+        type: "index",
+        msg: "test",
         sessionId: "mock-session",
       }),
     });
-    expect(result).toEqual(mockResponse);
+    expect(result).toBe(mockReply);
   });
 });
