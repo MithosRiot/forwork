@@ -1,34 +1,22 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import determineBackendUrl from "../util/determineBackendUrl";
+import os
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-describe("determineBackendUrl", () => {
-  beforeEach(() => {
-    const g = globalThis as any;
-    g.window = g.window || {};
-    delete g.window.__RUNTIME_ENV__;
-    vi.unstubAllEnvs();
-  });
+app = FastAPI()
 
-  it("returns runtime BACKEND_URL when provided", () => {
-    const g = globalThis as any;
-    g.window.__RUNTIME_ENV__ = { BACKEND_URL: "http://localhost:8080" };
+env_suffix = os.getenv("NEW_RELIC_ENVIRONMENT", "dt")
+if env_suffix == "eut":
+    env_suffix = "smktest"
 
-    const result = determineBackendUrl();
+frontend_origin = f"https://elis-assistant-{env_suffix}.k8s.elis.nonprod.uscis.dhs.gov"
 
-    expect(result).toBe("http://localhost:8080/");
-  });
-
-  it("falls back to VITE_BACKEND_URL when runtime value is missing", () => {
-    vi.stubEnv("VITE_BACKEND_URL", "http://production-api");
-
-    const result = determineBackendUrl();
-
-    expect(result).toBe("http://production-api/");
-  });
-
-  it("falls back to BASE_URL + api/assistant when no runtime/env override", () => {
-    const result = determineBackendUrl();
-
-    expect(result.endsWith("api/assistant/")).toBe(true);
-  });
-});
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        frontend_origin,
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
