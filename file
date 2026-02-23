@@ -1,16 +1,31 @@
-export default async function determineBackendUrl(): Promise<string> {
-  const isLocalConfig = import.meta.env.VITE_LOCAL_CONFIG === 'true';
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import determineBackendUrl from "../util/determineBackendUrl";
 
-  if (isLocalConfig) {
-    const localConfigModule = await import('../config/local/config.json');
-    return localConfigModule.default.backendIp;
-  }
+describe("determineBackendUrl", () => {
+  beforeEach(() => {
+    delete (window as any).__RUNTIME_ENV__;
+    vi.unstubAllEnvs();
+  });
 
-  const response = await fetch('/config.json');
-  if (!response.ok) {
-    throw new Error('Failed to load runtime config.json');
-  }
+  it("returns runtime BACKEND_URL when provided", () => {
+    (window as any).__RUNTIME_ENV__ = { BACKEND_URL: "http://localhost:8080" };
 
-  const runtimeConfig = await response.json();
-  return runtimeConfig.backendIp;
-}
+    const result = determineBackendUrl();
+
+    expect(result).toBe("http://localhost:8080/");
+  });
+
+  it("falls back to VITE_BACKEND_URL when runtime value is missing", () => {
+    vi.stubEnv("VITE_BACKEND_URL", "http://production-api");
+
+    const result = determineBackendUrl();
+
+    expect(result).toBe("http://production-api/");
+  });
+
+  it("falls back to BASE_URL + api/assistant when no runtime/env override", () => {
+    const result = determineBackendUrl();
+
+    expect(result.endsWith("api/assistant/")).toBe(true);
+  });
+});
