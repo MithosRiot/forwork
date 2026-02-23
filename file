@@ -1,37 +1,34 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import apiConnectIndex from "../util/apiConnectIndex";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import determineBackendUrl from "../util/determineBackendUrl";
 
-vi.mock("../util/determineBackendUrl", () => ({
-  default: vi.fn(),
-}));
-
-describe("apiConnectIndex", () => {
+describe("determineBackendUrl", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    const g = globalThis as any;
+    g.window = g.window || {};
+    delete g.window.__RUNTIME_ENV__;
+    vi.unstubAllEnvs();
   });
 
-  it("successfully fetches and returns correctly", async () => {
-    const mockReply = "indexed";
+  it("returns runtime BACKEND_URL when provided", () => {
+    const g = globalThis as any;
+    g.window.__RUNTIME_ENV__ = { BACKEND_URL: "http://localhost:8080" };
 
-    (determineBackendUrl as unknown as ReturnType<typeof vi.fn>).mockReturnValue("http://localhost:8080/");
-    global.fetch = vi.fn().mockResolvedValue({
-      json: vi.fn().mockResolvedValue({ reply: mockReply }),
-    } as any);
+    const result = determineBackendUrl();
 
-    const result = await apiConnectIndex("test", "mock-session");
+    expect(result).toBe("http://localhost:8080/");
+  });
 
-    expect(fetch).toHaveBeenCalledWith("http://localhost:8080/index", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        type: "index",
-        msg: "test",
-        sessionId: "mock-session",
-      }),
-    });
-    expect(result).toBe(mockReply);
+  it("falls back to VITE_BACKEND_URL when runtime value is missing", () => {
+    vi.stubEnv("VITE_BACKEND_URL", "http://production-api");
+
+    const result = determineBackendUrl();
+
+    expect(result).toBe("http://production-api/");
+  });
+
+  it("falls back to BASE_URL + api/assistant when no runtime/env override", () => {
+    const result = determineBackendUrl();
+
+    expect(result.endsWith("api/assistant/")).toBe(true);
   });
 });
