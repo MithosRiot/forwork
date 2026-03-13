@@ -1,22 +1,15 @@
-import os
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+vault.hashicorp.com/agent-inject-secret-application.properties: 'kubernetes/{{ .Values.deployment.namespace }}/{{ .Values.app.name }}/application-properties'
+vault.hashicorp.com/agent-inject-template-application.properties: |
+  {{`{{- with secret "kubernetes/`}}{{ .Values.deployment.namespace }}{{`/`}}{{ .Values.app.name }}{{`/application-properties" -}}`}}
+  {{- range $k, $v := .Data.data }}
+  export {{ $k }}="{{ $v }}"
+  {{- end }}
+  {{`{{- end -}}`}}
 
-app = FastAPI()
-
-env_suffix = os.getenv("NEW_RELIC_ENVIRONMENT", "dt")
-if env_suffix == "eut":
-    env_suffix = "smktest"
-
-frontend_origin = f"https://elis-assistant-{env_suffix}.k8s.elis.nonprod.uscis.dhs.gov"
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        frontend_origin,
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+vault.hashicorp.com/agent-inject-secret-kong.properties: 'kubernetes/{{ .Values.deployment.namespace }}/elis-kong-apigw-{{ (split "-" .Values.deployment.namespace)._1 }}'
+vault.hashicorp.com/agent-inject-template-kong.properties: |
+  {{`{{- with secret "kubernetes/`}}{{ .Values.deployment.namespace }}{{`/elis-kong-apigw-`}}{{ (split "-" .Values.deployment.namespace)._1 }}{{`" -}}`}}
+  {{- range $k, $v := .Data.data }}
+  export {{ $k }}="{{ $v }}"
+  {{- end }}
+  {{`{{- end -}}`}}
