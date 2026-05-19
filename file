@@ -1,15 +1,602 @@
-vault.hashicorp.com/agent-inject-secret-application.properties: 'kubernetes/{{ .Values.deployment.namespace }}/{{ .Values.app.name }}/application-properties'
-vault.hashicorp.com/agent-inject-template-application.properties: |
-  {{`{{- with secret "kubernetes/`}}{{ .Values.deployment.namespace }}{{`/`}}{{ .Values.app.name }}{{`/application-properties" -}}`}}
-  {{- range $k, $v := .Data.data }}
-  export {{ $k }}="{{ $v }}"
-  {{- end }}
-  {{`{{- end -}}`}}
+# s3_pg_kendra_sync.py
 
-vault.hashicorp.com/agent-inject-secret-kong.properties: 'kubernetes/{{ .Values.deployment.namespace }}/elis-kong-apigw-{{ (split "-" .Values.deployment.namespace)._1 }}'
-vault.hashicorp.com/agent-inject-template-kong.properties: |
-  {{`{{- with secret "kubernetes/`}}{{ .Values.deployment.namespace }}{{`/elis-kong-apigw-`}}{{ (split "-" .Values.deployment.namespace)._1 }}{{`" -}}`}}
-  {{- range $k, $v := .Data.data }}
-  export {{ $k }}="{{ $v }}"
-  {{- end }}
-  {{`{{- end -}}`}}
+import asyncio
+import json
+import logging
+import os
+import random
+import re
+import time
+from contextlib import closing
+from datetime import datetime, timezone
+from threading import Event
+from typing import Dict, List, Optional
+
+import boto3
+import psycopg2
+from botocore.exceptions import ClientError
+from psycopg2.pool import SimpleConnectionPool
+
+logger = logging.getLogger(__name__)
+
+SYNC_INTERVAL_SECONDS = int(
+    os.getenv("SYNC_INTERVAL_SECONDS", str(7 * 24 * 60 * 60))
+)
+
+BUCKET_NAME = os.environ["SYNC_BUCKET_NAME"]
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+
+KENDRA_INDEX_ID = os.environ["KENDRA_INDEX_ID"]
+KENDRA_DATA_SOURCE_ID = os.environ["KENDRA_DATA_SOURCE_ID"]
+
+DB_POOL = SimpleConnectionPool(
+    minconn=1,
+    maxconn=5,
+    host=os.environ["DB_HOST"],
+    port=os.getenv("DB_PORT", "5432"),
+    dbname=os.environ["DB_NAME"],
+    user=os.environ["DB_USER"],
+    password=os.environ["DB_PASSWORD"],
+)
+
+ORG_PREFIXES = {
+    "elis": "ELIS",
+    "global": "GLOB",
+    "benefits": "BEN",
+}
+
+SCAN_FOLDERS = [
+    "elis/",
+    "global/",
+    "benefits/",
+]
+
+shutdown_event = Event()
+
+s3_client = boto3.client("s3", region_name=AWS_REGION)
+kendra_client = boto3.client("kendra", region_name=AWS_REGION)
+
+
+def retry(max_attempts=5, base_delay=1):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            last_exc = None
+
+            for attempt in range(max_attempts):
+                try:
+                    return func(*args, **kwargs)
+
+                except Exception as exc:
+                    last_exc = exc
+
+                    if attempt == max_attempts - 1:
+                        raise
+
+                    sleep_time = (
+                        base_delay * (2 ** attempt)
+                        + random.uniform(0, 1)
+                    )
+
+                    logger.warning(
+                        "Retrying %s in %.2fs (%s/%s): %s",
+                        func.__name__,
+                        sleep_time,
+                        attempt + 1,
+                        max_attempts,
+                        str(exc),
+                    )
+
+                    time.sleep(sleep_time)
+
+            raise last_exc
+
+        return wrapper
+
+    return decorator
+
+
+def get_db_connection():
+    return DB_POOL.getconn()
+
+
+def return_db_connection(conn):
+    DB_POOL.putconn(conn)
+
+
+def s3_uri(bucket: str, key: str) -> str:
+    return f"s3://{bucket}/{key}"
+
+
+def normalize_timestamp(dt: datetime) -> datetime:
+    """
+    Convert timezone-aware AWS timestamp to naive UTC timestamp
+    for TIMESTAMP WITHOUT TIME ZONE PostgreSQL columns.
+    """
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+ARTICLE_REGEX = re.compile(
+    r"^(?P<title>.+?)\s-\s(?P<forms>[^/]+)\.html$",
+    re.IGNORECASE,
+)
+
+
+def parse_s3_article_key(key: str) -> Optional[Dict]:
+    if key.startswith("metadata/"):
+        return None
+
+    if not key.lower().endswith(".html"):
+        return None
+
+    parts = key.split("/", 1)
+
+    if len(parts) != 2:
+        return None
+
+    organization = parts[0]
+    file_name = parts[1]
+
+    if organization not in ORG_PREFIXES:
+        raise ValueError(f"Unknown organization folder: {organization}")
+
+    match = ARTICLE_REGEX.match(file_name)
+
+    if match:
+        title = match.group("title").strip()
+
+        forms = [
+            f.strip()
+            for f in match.group("forms").split(",")
+            if f.strip()
+        ]
+
+    else:
+        title = file_name[:-5]
+        forms = []
+
+    return {
+        "key": key,
+        "organization": organization,
+        "file_name": file_name,
+        "title": title,
+        "form_types": forms,
+        "category": ", ".join(forms),
+        "metadata_key": (
+            f"metadata/{organization}/"
+            f"{file_name}.metadata.json"
+        ),
+    }
+
+
+def build_metadata(article: Dict) -> Dict:
+    return {
+        "DocumentId": s3_uri(BUCKET_NAME, article["key"]),
+        "Attributes": {
+            "FormType": article["form_types"]
+        },
+        "Title": article["file_name"],
+    }
+
+
+@retry()
+def list_article_objects() -> Dict[str, Dict]:
+    found = {}
+
+    for prefix in SCAN_FOLDERS:
+        paginator = s3_client.get_paginator("list_objects_v2")
+
+        for page in paginator.paginate(
+            Bucket=BUCKET_NAME,
+            Prefix=prefix,
+        ):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+
+                article = parse_s3_article_key(key)
+
+                if not article:
+                    continue
+
+                article["last_modified"] = normalize_timestamp(
+                    obj["LastModified"]
+                )
+
+                found[key] = article
+
+    return found
+
+
+@retry()
+def get_metadata(metadata_key: str):
+    try:
+        response = s3_client.get_object(
+            Bucket=BUCKET_NAME,
+            Key=metadata_key,
+        )
+
+        body = response["Body"].read().decode("utf-8")
+
+        return (
+            json.loads(body),
+            normalize_timestamp(response["LastModified"]),
+        )
+
+    except ClientError as exc:
+        code = exc.response["Error"]["Code"]
+
+        if code in ("NoSuchKey", "404"):
+            return None, None
+
+        raise
+
+
+@retry()
+def put_metadata(article: Dict):
+    metadata = build_metadata(article)
+
+    s3_client.put_object(
+        Bucket=BUCKET_NAME,
+        Key=article["metadata_key"],
+        Body=json.dumps(metadata, indent=2).encode("utf-8"),
+        ContentType="application/json",
+    )
+
+    logger.info(
+        "Updated metadata: %s",
+        article["metadata_key"],
+    )
+
+
+def metadata_needs_update(
+    article: Dict,
+    current_metadata: Optional[Dict],
+    metadata_last_modified: Optional[datetime],
+) -> bool:
+    desired = build_metadata(article)
+
+    if current_metadata != desired:
+        return True
+
+    if not metadata_last_modified:
+        return True
+
+    return metadata_last_modified < article["last_modified"]
+
+
+def get_existing_article_id(
+    cur,
+    organization: str,
+    title: str,
+):
+    cur.execute(
+        """
+        SELECT article_id
+        FROM object
+        WHERE organization = %s
+          AND title = %s
+        ORDER BY date_created ASC
+        LIMIT 1
+        """,
+        (organization, title),
+    )
+
+    row = cur.fetchone()
+
+    return row[0] if row else None
+
+
+def generate_next_article_id(cur, organization: str):
+    prefix = ORG_PREFIXES.get(organization)
+
+    if not prefix:
+        raise ValueError(
+            f"Unknown organization: {organization}"
+        )
+
+    cur.execute(
+        """
+        SELECT article_id
+        FROM object
+        WHERE article_id LIKE %s
+        ORDER BY article_id DESC
+        LIMIT 1
+        FOR UPDATE
+        """,
+        (f"{prefix}%",),
+    )
+
+    row = cur.fetchone()
+
+    if not row:
+        next_num = 1
+
+    else:
+        match = re.search(r"(\d+)$", row[0])
+
+        next_num = (
+            int(match.group(1)) + 1
+            if match
+            else 1
+        )
+
+    return f"{prefix}{next_num:07d}"
+
+
+def upsert_pg_article(cur, article: Dict):
+    article_id = get_existing_article_id(
+        cur,
+        article["organization"],
+        article["title"],
+    )
+
+    if not article_id:
+        article_id = generate_next_article_id(
+            cur,
+            article["organization"],
+        )
+
+    cur.execute(
+        """
+        INSERT INTO object (
+            article_id,
+            file_name,
+            title,
+            organization,
+            category,
+            s3_uri,
+            date_created,
+            date_updated,
+            status,
+            version,
+            is_active
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            NOW(),
+            %s,
+            %s,
+            %s,
+            %s
+        )
+        ON CONFLICT (article_id)
+        DO UPDATE SET
+            file_name = EXCLUDED.file_name,
+            title = EXCLUDED.title,
+            organization = EXCLUDED.organization,
+            category = EXCLUDED.category,
+            s3_uri = EXCLUDED.s3_uri,
+            date_updated = EXCLUDED.date_updated,
+            status = EXCLUDED.status,
+            is_active = EXCLUDED.is_active
+        """,
+        (
+            article_id,
+            article["file_name"],
+            article["title"],
+            article["organization"],
+            article["category"],
+            s3_uri(BUCKET_NAME, article["key"]),
+            article["last_modified"],
+            "active",
+            "1",
+            True,
+        ),
+    )
+
+
+def soft_delete_missing_articles(
+    cur,
+    active_s3_uris: List[str],
+):
+    cur.execute(
+        """
+        UPDATE object
+        SET
+            is_active = false,
+            status = 'deleted',
+            date_updated = NOW()
+        WHERE is_active = true
+          AND s3_uri IS NOT NULL
+          AND s3_uri <> ALL(%s)
+        """,
+        (active_s3_uris,),
+    )
+
+    logger.info(
+        "Soft deleted %s articles",
+        cur.rowcount,
+    )
+
+
+@retry()
+def delete_orphan_metadata(active_articles: Dict[str, Dict]):
+    valid_metadata_keys = {
+        article["metadata_key"]
+        for article in active_articles.values()
+    }
+
+    paginator = s3_client.get_paginator(
+        "list_objects_v2"
+    )
+
+    deleted = 0
+
+    for page in paginator.paginate(
+        Bucket=BUCKET_NAME,
+        Prefix="metadata/",
+    ):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+
+            if not key.endswith(".metadata.json"):
+                continue
+
+            if key not in valid_metadata_keys:
+                s3_client.delete_object(
+                    Bucket=BUCKET_NAME,
+                    Key=key,
+                )
+
+                deleted += 1
+
+    logger.info(
+        "Deleted %s orphan metadata files",
+        deleted,
+    )
+
+
+@retry()
+def start_kendra_sync():
+    try:
+        response = (
+            kendra_client.start_data_source_sync_job(
+                Id=KENDRA_DATA_SOURCE_ID,
+                IndexId=KENDRA_INDEX_ID,
+            )
+        )
+
+        logger.info(
+            "Started Kendra sync: %s",
+            response.get("ExecutionId"),
+        )
+
+    except ClientError as exc:
+        if (
+            exc.response["Error"]["Code"]
+            == "ResourceInUseException"
+        ):
+            logger.warning(
+                "Kendra sync already running"
+            )
+
+            return
+
+        raise
+
+
+def acquire_sync_lock(cur):
+    """
+    Prevent overlapping syncs.
+    """
+    cur.execute(
+        "SELECT pg_try_advisory_lock(987654321)"
+    )
+
+    locked = cur.fetchone()[0]
+
+    return locked
+
+
+def release_sync_lock(cur):
+    cur.execute(
+        "SELECT pg_advisory_unlock(987654321)"
+    )
+
+
+def run_sync_once():
+    logger.info("Starting sync")
+
+    active_articles = list_article_objects()
+
+    active_s3_uris = [
+        s3_uri(BUCKET_NAME, a["key"])
+        for a in active_articles.values()
+    ]
+
+    metadata_changed = False
+
+    conn = get_db_connection()
+
+    try:
+        with conn:
+            with conn.cursor() as cur:
+
+                if not acquire_sync_lock(cur):
+                    logger.warning(
+                        "Sync already running. Skipping."
+                    )
+
+                    return
+
+                try:
+                    for article in active_articles.values():
+
+                        if shutdown_event.is_set():
+                            logger.warning(
+                                "Shutdown requested"
+                            )
+                            return
+
+                        current_metadata, metadata_ts = (
+                            get_metadata(
+                                article["metadata_key"]
+                            )
+                        )
+
+                        if metadata_needs_update(
+                            article,
+                            current_metadata,
+                            metadata_ts,
+                        ):
+                            put_metadata(article)
+                            metadata_changed = True
+
+                        upsert_pg_article(
+                            cur,
+                            article,
+                        )
+
+                    soft_delete_missing_articles(
+                        cur,
+                        active_s3_uris,
+                    )
+
+                finally:
+                    release_sync_lock(cur)
+
+        delete_orphan_metadata(active_articles)
+
+        if metadata_changed:
+            start_kendra_sync()
+
+        else:
+            logger.info(
+                "No metadata changes. "
+                "Skipping Kendra sync."
+            )
+
+        logger.info("Sync complete")
+
+    finally:
+        return_db_connection(conn)
+
+
+async def timed_sync_loop():
+    while not shutdown_event.is_set():
+
+        try:
+            await asyncio.to_thread(
+                run_sync_once
+            )
+
+        except Exception:
+            logger.exception(
+                "Sync failed"
+            )
+
+        for _ in range(
+            SYNC_INTERVAL_SECONDS
+        ):
+            if shutdown_event.is_set():
+                return
+
+            await asyncio.sleep(1)
+
+
+def stop_sync():
+    shutdown_event.set()
