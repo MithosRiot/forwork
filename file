@@ -1,15 +1,54 @@
-Private Sub Worksheet_Change(ByVal Target As Range)
+Sub RunReport()
 
-    If Intersect(Target, Me.Range("B3")) Is Nothing Then
+    Dim ws As Worksheet
+    Dim r As Long
+    Dim missing As String
+
+    Set ws = ThisWorkbook.Sheets("Tool")
+
+    ' Check current import statuses
+    UpdateStatuses
+
+    For r = 6 To 8
+        If ws.Cells(r, 2).Value <> "Imported" Then
+            missing = missing & vbCrLf & _
+                "- " & ws.Cells(r, 1).Value
+        End If
+    Next r
+
+    If missing <> "" Then
+        ws.Range("B11").Value = "Not Ready"
+
+        MsgBox "Cannot run report. Import current data for:" _
+            & vbCrLf & missing, vbExclamation
+
         Exit Sub
     End If
 
-    Application.EnableEvents = False
+    On Error GoTo Failed
 
-    UpdateStatuses
+    Application.ScreenUpdating = False
 
-    Me.Range("B11").Value = "Out of Date"
+    ' Refresh all workbook calculations
+    Application.CalculateFull
 
-    Application.EnableEvents = True
+    ' Record the successful run
+    ws.Range("B13").Value = Now
+    ws.Range("B13").NumberFormat = _
+        "m/d/yyyy h:mm AM/PM"
+
+    ws.Range("B11").Value = "Up to Date"
+
+    Application.ScreenUpdating = True
+
+    MsgBox "Report completed successfully.", vbInformation
+
+    Exit Sub
+
+Failed:
+    Application.ScreenUpdating = True
+    ws.Range("B11").Value = "Out of Date"
+
+    MsgBox "Report failed: " & Err.Description, vbCritical
 
 End Sub
