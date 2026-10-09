@@ -1,120 +1,15 @@
-Option Explicit
+Private Sub Worksheet_Change(ByVal Target As Range)
 
-Sub ImportED()
-    ImportFile "ED", "ED_Data", 6
-End Sub
-
-Sub ImportWE()
-    ImportFile "WE", "WE_Data", 7
-End Sub
-
-Sub ImportJL()
-    ImportFile "JL", "JL_Data", 8
-End Sub
-
-Sub ImportFile(reportName As String, _
-    sheetName As String, statusRow As Long)
-
-    Dim path As Variant
-    Dim srcWB As Workbook
-    Dim srcWS As Worksheet
-    Dim destWS As Worksheet
-    Dim toolWS As Worksheet
-    Dim rows As Long
-
-    Set toolWS = ThisWorkbook.Sheets("Tool")
-    Set destWS = ThisWorkbook.Sheets(sheetName)
-
-    path = Application.GetOpenFilename( _
-        "Excel and CSV Files (*.xlsx;*.xlsm;*.csv)," & _
-        "*.xlsx;*.xlsm;*.csv", , _
-        "Select " & reportName & " Report")
-
-    If VarType(path) = vbBoolean Then Exit Sub
-
-    On Error GoTo Failed
-
-    Application.ScreenUpdating = False
-
-    Set srcWB = Workbooks.Open(CStr(path), ReadOnly:=True)
-    Set srcWS = srcWB.Worksheets(1)
-
-    rows = srcWS.UsedRange.Rows.Count
-
-    If rows < 2 Then
-        Err.Raise vbObjectError + 100, , _
-            "The selected file has no data rows."
+    If Intersect(Target, Me.Range("B3")) Is Nothing Then
+        Exit Sub
     End If
 
-    If srcWS.UsedRange.Column <> 1 Or _
-       srcWS.UsedRange.Row <> 1 Then
-        Err.Raise vbObjectError + 101, , _
-            "Source data must begin in cell A1."
-    End If
-
-    ' Replace the old data only after validation.
-    destWS.Cells.ClearContents
-
-    destWS.Range("A1").Resize( _
-        srcWS.UsedRange.Rows.Count, _
-        srcWS.UsedRange.Columns.Count).Value = _
-        srcWS.UsedRange.Value
-
-    srcWB.Close SaveChanges:=False
-    Set srcWB = Nothing
-
-    toolWS.Cells(statusRow, 3).Value = Dir(CStr(path))
-    toolWS.Cells(statusRow, 4).Value = Now
-    toolWS.Cells(statusRow, 5).Value = rows - 1
-
-    ' Store the week associated with this import.
-    toolWS.Cells(statusRow, 6).Value = toolWS.Range("B3").Value
-
-    ' Invalidate the previous dashboard result.
-    toolWS.Range("B11").Value = "Out of Date"
+    Application.EnableEvents = False
 
     UpdateStatuses
 
-    Application.ScreenUpdating = True
+    Me.Range("B11").Value = "Out of Date"
 
-    MsgBox reportName & " imported successfully.", _
-        vbInformation
-
-    Exit Sub
-
-Failed:
-    On Error Resume Next
-    If Not srcWB Is Nothing Then
-        srcWB.Close SaveChanges:=False
-    End If
-
-    Application.ScreenUpdating = True
-
-    MsgBox "Import failed: " & Err.Description, _
-        vbCritical
-
-End Sub
-
-Sub UpdateStatuses()
-
-    Dim ws As Worksheet
-    Dim r As Long
-
-    Set ws = ThisWorkbook.Sheets("Tool")
-
-    For r = 6 To 8
-
-        If ws.Cells(r, 3).Value = "" Then
-            ws.Cells(r, 2).Value = "Missing"
-
-        ElseIf ws.Cells(r, 6).Value <> _
-               ws.Range("B3").Value Then
-            ws.Cells(r, 2).Value = "Out of Date"
-
-        Else
-            ws.Cells(r, 2).Value = "Imported"
-        End If
-
-    Next r
+    Application.EnableEvents = True
 
 End Sub
