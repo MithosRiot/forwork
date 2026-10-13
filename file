@@ -1,147 +1,83 @@
-Sub ImportFile(reportName As String, _
-    sheetName As String, statusRow As Long)
+Sub UpdateStatuses()
 
-    Dim filePath As Variant
-    Dim srcWB As Workbook
-    Dim srcWS As Worksheet
-    Dim destWS As Worksheet
-    Dim toolWS As Worksheet
+    Dim ws As Worksheet
+    Dim hist As Worksheet
+    Dim r As Long
+    Dim lastRow As Long
+    Dim historyFound As Boolean
+    Dim i As Long
+    Dim reportDate As Date
 
-    Dim data As Variant
-    Dim rowCount As Long
-    Dim colCount As Long
-    Dim historySaved As Boolean
-    Dim needsHistory As Boolean
-    Dim failureMessage As String
+    Set ws = ThisWorkbook.Worksheets("Tool")
 
-    On Error GoTo ImportFailed
+    For r = 6 To 8
 
-    Set toolWS = ThisWorkbook.Worksheets("Tool")
-    Set destWS = ThisWorkbook.Worksheets(sheetName)
+        If ws.Cells(r, 3).Value = "" Then
 
-    If Not IsDate(toolWS.Range("B3").Value) Then
-        MsgBox "Select a valid reporting Friday.", _
-            vbExclamation
-        Exit Sub
-    End If
+            ws.Cells(r, 2).Value = "Missing"
 
-    filePath = Application.GetOpenFilename( _
-        "Excel and CSV Files (*.xlsx;*.xlsm;*.csv)," & _
-        "*.xlsx;*.xlsm;*.csv", , _
-        "Select " & reportName & " Report")
+        ElseIf Not IsDate(ws.Cells(r, 6).Value) Then
 
-    If VarType(filePath) = vbBoolean Then Exit Sub
+            ws.Cells(r, 2).Value = "Out of Date"
 
-    Application.ScreenUpdating = False
+        ElseIf Not IsDate(ws.Range("B3").Value) Then
 
-    Set srcWB = Workbooks.Open( _
-        Filename:=CStr(filePath), ReadOnly:=True)
+            ws.Cells(r, 2).Value = "Out of Date"
 
-    Set srcWS = srcWB.Worksheets(1)
+        ElseIf DateValue(ws.Cells(r, 6).Value) <> _
+               DateValue(ws.Range("B3").Value) Then
 
-    If srcWS.UsedRange.Row <> 1 Or _
-       srcWS.UsedRange.Column <> 1 Then
+            ws.Cells(r, 2).Value = "Out of Date"
 
-        Err.Raise vbObjectError + 401, , _
-            "Source data must begin in cell A1."
+        Else
 
-    End If
+            ' DFAS does not require historical archiving.
+            If r = 8 Then
 
-    rowCount = srcWS.UsedRange.Rows.Count
-    colCount = srcWS.UsedRange.Columns.Count
+                ws.Cells(r, 2).Value = "Imported"
 
-    If rowCount < 2 Then
-        Err.Raise vbObjectError + 402, , _
-            "The selected file contains no data rows."
-    End If
+            Else
 
-    ' Read source data before replacing anything
-    data = srcWS.Range("A1").Resize( _
-        rowCount, colCount).Value
+                If r = 6 Then
+                    Set hist = ThisWorkbook.Worksheets( _
+                        "History_enhancedDetained")
+                Else
+                    Set hist = ThisWorkbook.Worksheets( _
+                        "History_webEx")
+                End If
 
-    srcWB.Close SaveChanges:=False
-    Set srcWB = Nothing
+                reportDate = DateValue(ws.Range("B3").Value)
+                historyFound = False
 
-    ' Replace the previous imported data
-    destWS.Cells.ClearContents
+                lastRow = hist.Cells( _
+                    hist.Rows.Count, "A").End(xlUp).Row
 
-    destWS.Range("A1").Resize( _
-        rowCount, colCount).Value = data
+                For i = 2 To lastRow
 
-    ' Record import information
-    toolWS.Cells(statusRow, 3).Value = Dir(CStr(filePath))
-    toolWS.Cells(statusRow, 4).Value = Now
-    toolWS.Cells(statusRow, 5).Value = rowCount - 1
-    toolWS.Cells(statusRow, 6).Value = _
-        DateValue(toolWS.Range("B3").Value)
+                    If IsDate(hist.Cells(i, "A").Value) Then
 
-    toolWS.Cells(statusRow, 4).NumberFormat = _
-        "m/d/yyyy h:mm AM/PM"
+                        If DateValue(hist.Cells(i, "A").Value) = _
+                           reportDate Then
 
-    toolWS.Cells(statusRow, 6).NumberFormat = _
-        "m/d/yyyy"
+                            historyFound = True
+                            Exit For
 
-    ' The dashboard needs to be rerun
-    toolWS.Range("B11").Value = "Out of Date"
+                        End If
 
-    needsHistory = False
-    historySaved = True
+                    End If
 
-    ' Automatically archive Enhanced Detained and WebEx
-    Select Case sheetName
+                Next i
 
-        Case "Enhanced Detained - Excel Data"
+                If historyFound Then
+                    ws.Cells(r, 2).Value = "Imported"
+                Else
+                    ws.Cells(r, 2).Value = "Archive Failed"
+                End If
 
-            needsHistory = True
-            historySaved = SaveEnhancedHistory()
+            End If
 
-        Case "Detained Ops IJ WebEx Data"
+        End If
 
-            needsHistory = True
-            historySaved = SaveWebExHistory()
-
-    End Select
-
-    If needsHistory And Not historySaved Then
-
-        toolWS.Cells(statusRow, 2).Value = _
-            "Archive Failed"
-
-        toolWS.Range("B11").Value = "Not Ready"
-
-        Application.ScreenUpdating = True
-
-        MsgBox reportName & " data was imported, " & _
-            "but history could not be saved." & vbCrLf & _
-            "Do not run the Dashboard until resolved.", _
-            vbCritical
-
-        Exit Sub
-
-    End If
-
-    UpdateStatuses
-
-    Application.ScreenUpdating = True
-
-    MsgBox reportName & " imported successfully.", _
-        vbInformation
-
-    Exit Sub
-
-ImportFailed:
-
-    failureMessage = Err.Description
-
-    On Error Resume Next
-
-    If Not srcWB Is Nothing Then
-        srcWB.Close SaveChanges:=False
-    End If
-
-    Application.ScreenUpdating = True
-
-    MsgBox "Import failed: " & failureMessage, _
-        vbCritical
+    Next r
 
 End Sub
