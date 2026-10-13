@@ -1,43 +1,38 @@
-Function GetPreviousReportDate( _
-    historySheet As String, _
-    currentDate As Date) As Variant
+Sub UpdatePreviousReportDates()
 
     Dim ws As Worksheet
-    Dim lastRow As Long
-    Dim r As Long
-    Dim reportDate As Date
-    Dim previousDate As Date
-    Dim found As Boolean
+    Dim currentDate As Date
+    Dim previousDate As Variant
 
-    Set ws = ThisWorkbook.Worksheets(historySheet)
+    Set ws = ThisWorkbook.Worksheets("Tool")
 
-    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
-
-    found = False
-
-    For r = 2 To lastRow
-
-        If IsDate(ws.Cells(r, "A").Value) Then
-
-            reportDate = DateValue(ws.Cells(r, "A").Value)
-
-            If reportDate < currentDate Then
-
-                If Not found Or reportDate > previousDate Then
-                    previousDate = reportDate
-                    found = True
-                End If
-
-            End If
-
-        End If
-
-    Next r
-
-    If found Then
-        GetPreviousReportDate = previousDate
-    Else
-        GetPreviousReportDate = Empty
+    If Not IsDate(ws.Range("B3").Value) Then
+        ws.Range("B16:B17").ClearContents
+        Exit Sub
     End If
 
-End Function
+    currentDate = DateValue(ws.Range("B3").Value)
+
+    ' Enhanced Detained previous report
+    previousDate = GetPreviousReportDate( _
+        "History_enhancedDetained", currentDate)
+
+    If IsEmpty(previousDate) Then
+        ws.Range("B16").Value = "Not Available"
+    Else
+        ws.Range("B16").Value = previousDate
+        ws.Range("B16").NumberFormat = "mmm d, yyyy"
+    End If
+
+    ' WebEx previous report
+    previousDate = GetPreviousReportDate( _
+        "History_webEx", currentDate)
+
+    If IsEmpty(previousDate) Then
+        ws.Range("B17").Value = "Not Available"
+    Else
+        ws.Range("B17").Value = previousDate
+        ws.Range("B17").NumberFormat = "mmm d, yyyy"
+    End If
+
+End Sub
