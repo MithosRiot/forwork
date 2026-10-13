@@ -1,148 +1,17 @@
-Sub SaveWebExHistory()
+' Invalidate the previous dashboard result.
+toolWS.Range("B11").Value = "Out of Date"
 
-    Dim src As Worksheet
-    Dim hist As Worksheet
-    Dim tool As Worksheet
-    Dim backup As Worksheet
+UpdateStatuses
 
-    Dim reportDate As Date
-    Dim lastRow As Long
-    Dim nextRow As Long
-    Dim existingRow As Long
-    Dim r As Long
+' Preserve the imported report in history.
+Select Case sheetName
 
-    Dim errorMessage As String
-    Dim backupComplete As Boolean
-    Dim historyModified As Boolean
-    Dim restoreSuccessful As Boolean
+    Case "Enhanced Detained - Excel Data"
+        SaveEnhancedHistory
 
-    On Error GoTo SaveFailed
+    Case "Detained Ops IJ WebEx Data"
+        SaveWebExHistory
 
-    Set src = ThisWorkbook.Sheets("Detained Ops IJ WebEx Data")
-    Set hist = ThisWorkbook.Sheets("History_webEx")
-    Set tool = ThisWorkbook.Sheets("Tool")
-    Set backup = ThisWorkbook.Sheets("History_Backup")
+End Select
 
-    ' Verify the selected reporting date
-    If Not IsDate(tool.Range("B3").Value) Then
-        Err.Raise vbObjectError + 201, , _
-            "Select a valid reporting Friday."
-    End If
-
-    reportDate = DateValue(tool.Range("B3").Value)
-
-    ' Verify the imported report belongs to this date
-    If Not IsDate(tool.Range("F7").Value) Then
-        Err.Raise vbObjectError + 202, , _
-            "No valid WebEx import reporting date found."
-    End If
-
-    If DateValue(tool.Range("F7").Value) <> reportDate Then
-        Err.Raise vbObjectError + 203, , _
-            "WebEx was imported for a different reporting date."
-    End If
-
-    ' Verify source data exists
-    lastRow = src.Cells(src.Rows.Count, "D").End(xlUp).Row
-
-    If lastRow < 2 Then
-        Err.Raise vbObjectError + 204, , _
-            "No WebEx data available to archive."
-    End If
-
-    ' Back up the complete existing WebEx history
-    backup.Cells.Clear
-
-    hist.UsedRange.Copy Destination:=backup.Range("A1")
-
-    backupComplete = True
-
-    ' Remove existing records for this reporting date
-    For existingRow = hist.Cells(hist.Rows.Count, "A") _
-        .End(xlUp).Row To 2 Step -1
-
-        If IsDate(hist.Cells(existingRow, "A").Value) Then
-
-            If DateValue(hist.Cells(existingRow, "A").Value) = _
-                reportDate Then
-
-                historyModified = True
-                hist.Rows(existingRow).Delete
-
-            End If
-
-        End If
-
-    Next existingRow
-
-    ' Archive the current WebEx report
-    For r = 2 To lastRow
-
-        If Trim(CStr(src.Cells(r, "D").Value)) <> "" Then
-
-            nextRow = hist.Cells(hist.Rows.Count, "A") _
-                .End(xlUp).Row + 1
-
-            historyModified = True
-
-            hist.Cells(nextRow, "A").Value = reportDate
-            hist.Cells(nextRow, "B").Value = src.Cells(r, "D").Value
-            hist.Cells(nextRow, "C").Value = src.Cells(r, "J").Value
-            hist.Cells(nextRow, "D").Value = src.Cells(r, "B").Value
-            hist.Cells(nextRow, "E").Value = src.Cells(r, "C").Value
-            hist.Cells(nextRow, "F").Value = src.Cells(r, "H").Value
-            hist.Cells(nextRow, "G").Value = src.Cells(r, "I").Value
-
-        End If
-
-    Next r
-
-    hist.Columns("A").NumberFormat = "mm/dd/yyyy"
-
-    MsgBox "WebEx history saved successfully.", vbInformation
-
-    Exit Sub
-
-SaveFailed:
-
-    errorMessage = Err.Description
-
-    ' Only restore if history was modified and
-    ' a complete backup is available
-    If historyModified And backupComplete Then
-
-        On Error Resume Next
-
-        Err.Clear
-        hist.Cells.Clear
-
-        backup.UsedRange.Copy Destination:=hist.Range("A1")
-
-        restoreSuccessful = (Err.Number = 0)
-
-        On Error GoTo 0
-
-        If restoreSuccessful Then
-
-            MsgBox "WebEx history save failed: " & _
-                errorMessage & vbCrLf & _
-                "Previous history restored.", vbCritical
-
-        Else
-
-            MsgBox "WebEx history save failed: " & _
-                errorMessage & vbCrLf & _
-                "Automatic recovery failed. Check " & _
-                "History_Backup before continuing.", vbCritical
-
-        End If
-
-    Else
-
-        MsgBox "WebEx history save failed: " & _
-            errorMessage & vbCrLf & _
-            "Existing history was not modified.", vbExclamation
-
-    End If
-
-End Sub
+Application.ScreenUpdating = True
