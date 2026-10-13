@@ -3,77 +3,51 @@ Sub SaveWebExHistory()
     Dim src As Worksheet
     Dim hist As Worksheet
     Dim tool As Worksheet
+    Dim backup As Worksheet
+
     Dim reportDate As Date
     Dim lastRow As Long
     Dim nextRow As Long
-    Dim r As Long
     Dim existingRow As Long
+    Dim r As Long
+
+    Dim errorMessage As String
+    Dim backupComplete As Boolean
+    Dim historyModified As Boolean
+    Dim restoreSuccessful As Boolean
+
+    On Error GoTo SaveFailed
 
     Set src = ThisWorkbook.Sheets("Detained Ops IJ WebEx Data")
     Set hist = ThisWorkbook.Sheets("History_webEx")
     Set tool = ThisWorkbook.Sheets("Tool")
+    Set backup = ThisWorkbook.Sheets("History_Backup")
 
-    reportDate = CDate(tool.Range("B3").Value)
+    ' Verify the selected reporting date
+    If Not IsDate(tool.Range("B3").Value) Then
+        Err.Raise vbObjectError + 201, , _
+            "Select a valid reporting Friday."
+    End If
 
-    ' Verify this report was imported for the selected date
+    reportDate = DateValue(tool.Range("B3").Value)
+
+    ' Verify the imported report belongs to this date
     If Not IsDate(tool.Range("F7").Value) Then
-        MsgBox "No valid WebEx import date found.", vbExclamation
-        Exit Sub
+        Err.Raise vbObjectError + 202, , _
+            "No valid WebEx import reporting date found."
     End If
 
-    If CLng(CDate(tool.Range("F7").Value)) <> _
-       CLng(reportDate) Then
-
-        MsgBox "WebEx data belongs to another reporting date.", _
-            vbExclamation
-        Exit Sub
-
+    If DateValue(tool.Range("F7").Value) <> reportDate Then
+        Err.Raise vbObjectError + 203, , _
+            "WebEx was imported for a different reporting date."
     End If
 
+    ' Verify source data exists
     lastRow = src.Cells(src.Rows.Count, "D").End(xlUp).Row
 
     If lastRow < 2 Then
-        MsgBox "No WebEx data available to archive.", vbExclamation
-        Exit Sub
+        Err.Raise vbObjectError + 204, , _
+            "No WebEx data available to archive."
     End If
 
-    ' Remove an existing snapshot for this date
-    For existingRow = hist.Cells(hist.Rows.Count, "A") _
-        .End(xlUp).Row To 2 Step -1
-
-        If IsDate(hist.Cells(existingRow, "A").Value) Then
-
-            If CLng(CDate(hist.Cells(existingRow, "A").Value)) = _
-               CLng(reportDate) Then
-
-                hist.Rows(existingRow).Delete
-
-            End If
-
-        End If
-
-    Next existingRow
-
-    ' Save the current WebEx data
-    For r = 2 To lastRow
-
-        If Trim(CStr(src.Cells(r, "D").Value)) <> "" Then
-
-            nextRow = hist.Cells(hist.Rows.Count, "A") _
-                .End(xlUp).Row + 1
-
-            hist.Cells(nextRow, "A").Value = reportDate
-            hist.Cells(nextRow, "B").Value = src.Cells(r, "D").Value
-            hist.Cells(nextRow, "C").Value = src.Cells(r, "J").Value
-            hist.Cells(nextRow, "D").Value = src.Cells(r, "B").Value
-            hist.Cells(nextRow, "E").Value = src.Cells(r, "C").Value
-            hist.Cells(nextRow, "F").Value = src.Cells(r, "H").Value
-            hist.Cells(nextRow, "G").Value = src.Cells(r, "I").Value
-
-        End If
-
-    Next r
-
-    MsgBox "WebEx history saved.", vbInformation
-
-End Sub
+    ' Back up the complete existing
