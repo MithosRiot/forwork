@@ -1,15 +1,79 @@
-' Verify that the imported file belongs to the selected date
-If Not IsDate(tool.Range("F6").Value) Then
-    MsgBox "No valid import reporting date found.", vbExclamation
-    Exit Sub
-End If
+Sub SaveWebExHistory()
 
-If CLng(CDate(tool.Range("F6").Value)) <> _
-   CLng(reportDate) Then
+    Dim src As Worksheet
+    Dim hist As Worksheet
+    Dim tool As Worksheet
+    Dim reportDate As Date
+    Dim lastRow As Long
+    Dim nextRow As Long
+    Dim r As Long
+    Dim existingRow As Long
 
-    MsgBox "Enhanced Detained was imported for a different " & _
-           "reporting date. Please import the correct file.", _
-           vbExclamation
-    Exit Sub
+    Set src = ThisWorkbook.Sheets("Detained Ops IJ WebEx Data")
+    Set hist = ThisWorkbook.Sheets("History_webEx")
+    Set tool = ThisWorkbook.Sheets("Tool")
 
-End If
+    reportDate = CDate(tool.Range("B3").Value)
+
+    ' Verify this report was imported for the selected date
+    If Not IsDate(tool.Range("F7").Value) Then
+        MsgBox "No valid WebEx import date found.", vbExclamation
+        Exit Sub
+    End If
+
+    If CLng(CDate(tool.Range("F7").Value)) <> _
+       CLng(reportDate) Then
+
+        MsgBox "WebEx data belongs to another reporting date.", _
+            vbExclamation
+        Exit Sub
+
+    End If
+
+    lastRow = src.Cells(src.Rows.Count, "D").End(xlUp).Row
+
+    If lastRow < 2 Then
+        MsgBox "No WebEx data available to archive.", vbExclamation
+        Exit Sub
+    End If
+
+    ' Remove an existing snapshot for this date
+    For existingRow = hist.Cells(hist.Rows.Count, "A") _
+        .End(xlUp).Row To 2 Step -1
+
+        If IsDate(hist.Cells(existingRow, "A").Value) Then
+
+            If CLng(CDate(hist.Cells(existingRow, "A").Value)) = _
+               CLng(reportDate) Then
+
+                hist.Rows(existingRow).Delete
+
+            End If
+
+        End If
+
+    Next existingRow
+
+    ' Save the current WebEx data
+    For r = 2 To lastRow
+
+        If Trim(CStr(src.Cells(r, "D").Value)) <> "" Then
+
+            nextRow = hist.Cells(hist.Rows.Count, "A") _
+                .End(xlUp).Row + 1
+
+            hist.Cells(nextRow, "A").Value = reportDate
+            hist.Cells(nextRow, "B").Value = src.Cells(r, "D").Value
+            hist.Cells(nextRow, "C").Value = src.Cells(r, "J").Value
+            hist.Cells(nextRow, "D").Value = src.Cells(r, "B").Value
+            hist.Cells(nextRow, "E").Value = src.Cells(r, "C").Value
+            hist.Cells(nextRow, "F").Value = src.Cells(r, "H").Value
+            hist.Cells(nextRow, "G").Value = src.Cells(r, "I").Value
+
+        End If
+
+    Next r
+
+    MsgBox "WebEx history saved.", vbInformation
+
+End Sub
