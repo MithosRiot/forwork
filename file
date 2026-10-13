@@ -1,182 +1,216 @@
-Function CompareWebEx() As Boolean
+Function CheckDFASVAV() As Boolean
 
-    Dim ws As Worksheet
-    Dim hist As Worksheet
-    Dim results As Worksheet
     Dim tool As Worksheet
+    Dim dfas As Worksheet
+    Dim enhanced As Worksheet
+    Dim webex As Worksheet
+    Dim results As Worksheet
 
-    Dim currentCodes As Object
-    Dim previousCodes As Object
+    Dim dfasCodes As Object
+    Dim seen As Object
+    Dim details As Variant
 
-    Dim currentDate As Date
-    Dim previousDate As Variant
     Dim lastRow As Long
     Dim r As Long
     Dim code As String
+    Dim vav As String
     Dim judgeName As String
-    Dim key As Variant
-    Dim onRow As Long
-    Dim offRow As Long
+
+    Dim enhancedRow As Long
+    Dim webexRow As Long
+    Dim missingED As Long
+    Dim missingWE As Long
+    Dim noED As Long
+    Dim noWE As Long
     Dim failureMessage As String
 
-    CompareWebEx = False
-    On Error GoTo CompareFailed
+    CheckDFASVAV = False
+    On Error GoTo CheckFailed
 
     Set tool = ThisWorkbook.Worksheets("Tool")
-    Set ws = ThisWorkbook.Worksheets( _
+    Set dfas = ThisWorkbook.Worksheets( _
+        "DFAS EIOR Judge List Data")
+    Set enhanced = ThisWorkbook.Worksheets( _
+        "Enhanced Detained - Excel Data")
+    Set webex = ThisWorkbook.Worksheets( _
         "Detained Ops IJ WebEx Data")
-    Set hist = ThisWorkbook.Worksheets("History_webEx")
-    Set results = ThisWorkbook.Worksheets("Results_WebEx")
+    Set results = ThisWorkbook.Worksheets("Results_DFAS")
 
-    tool.Range("B26").Value = "Running"
+    tool.Range("B27").Value = "Running"
     tool.Range("B11").Value = "Out of Date"
     DoEvents
 
-    If Not IsDate(tool.Range("B3").Value) Then
-        Err.Raise vbObjectError + 701, , _
-            "Invalid reporting date."
-    End If
-
-    currentDate = DateValue(tool.Range("B3").Value)
-
     UpdateStatuses
 
-    If tool.Range("B7").Value <> "Imported" Then
-        Err.Raise vbObjectError + 702, , _
-            "Current WebEx data is not ready."
-    End If
+    For r = 6 To 8
+        If tool.Cells(r, "B").Value <> "Imported" Then
+            Err.Raise vbObjectError + 801, , _
+                "All three current reports must be imported."
+        End If
+    Next r
 
-    previousDate = GetPreviousReportDate( _
-        "History_webEx", currentDate)
+    ' Build DFAS lookup.
+    ' A = IJ Code, B = Judge Name
+    ' C = Court, E = VAV Court
+    Set dfasCodes = CreateObject("Scripting.Dictionary")
+    dfasCodes.CompareMode = vbTextCompare
 
-    If IsEmpty(previousDate) Then
-        Err.Raise vbObjectError + 703, , _
-            "No previous WebEx report found."
-    End If
-
-    Set currentCodes = CreateObject("Scripting.Dictionary")
-    Set previousCodes = CreateObject("Scripting.Dictionary")
-
-    currentCodes.CompareMode = vbTextCompare
-    previousCodes.CompareMode = vbTextCompare
-
-    ' Read unique current IJ Codes
-    lastRow = ws.Cells(ws.Rows.Count, "D").End(xlUp).Row
+    lastRow = dfas.Cells(dfas.Rows.Count, "A").End(xlUp).Row
 
     For r = 2 To lastRow
 
-        code = UCase(Trim(CStr(ws.Cells(r, "D").Value)))
+        code = UCase(Trim(CStr(dfas.Cells(r, "A").Value)))
 
         If code <> "" Then
+            If Not dfasCodes.Exists(code) Then
 
-            judgeName = Trim(CStr(ws.Cells(r, "B").Value)) _
-                & ", " & Trim(CStr(ws.Cells(r, "C").Value))
+                dfasCodes.Add code, Array( _
+                    dfas.Cells(r, "B").Value, _
+                    dfas.Cells(r, "E").Value, _
+                    dfas.Cells(r, "C").Value)
 
-            If Not currentCodes.Exists(code) Then
-                currentCodes.Add code, judgeName
             End If
-
         End If
 
     Next r
 
-    ' Read unique previous IJ Codes
-    lastRow = hist.Cells(hist.Rows.Count, "A").End(xlUp).Row
+    If dfasCodes.Count = 0 Then
+        Err.Raise vbObjectError + 802, , _
+            "No valid IJ Codes found in DFAS."
+    End If
+
+    ' Preserve headings while clearing old results.
+    results.Range("A5:E10000").ClearContents
+    results.Range("F5:J10000").ClearContents
+
+    enhancedRow = 5
+    webexRow = 5
+
+    ' -------- ENHANCED DETAINED --------
+
+    Set seen = CreateObject("Scripting.Dictionary")
+    seen.CompareMode = vbTextCompare
+
+    lastRow = enhanced.Cells( _
+        enhanced.Rows.Count, "E").End(xlUp).Row
 
     For r = 2 To lastRow
 
-        If IsDate(hist.Cells(r, "A").Value) Then
+        code = UCase(Trim(CStr(enhanced.Cells(r, "E").Value)))
 
-            If DateValue(hist.Cells(r, "A").Value) = _
-                CDate(previousDate) Then
+        If code <> "" And Not seen.Exists(code) Then
 
-                code = UCase(Trim(CStr( _
-                    hist.Cells(r, "B").Value)))
+            seen.Add code, True
+            judgeName = CStr(enhanced.Cells(r, "F").Value)
 
-                If code <> "" Then
+            If dfasCodes.Exists(code) Then
 
-                    judgeName = Trim(CStr( _
-                        hist.Cells(r, "D").Value)) & ", " & _
-                        Trim(CStr(hist.Cells(r, "E").Value))
+                details = dfasCodes(code)
+                vav = UCase(Trim(CStr(details(1))))
 
-                    If Not previousCodes.Exists(code) Then
-                        previousCodes.Add code, judgeName
-                    End If
+                If vav = "NO" Then
+
+                    results.Cells(enhancedRow, "A").Value = code
+                    results.Cells(enhancedRow, "B").Value = details(0)
+                    results.Cells(enhancedRow, "C").Value = "No"
+                    results.Cells(enhancedRow, "D").Value = details(2)
+                    results.Cells(enhancedRow, "E").Value = "VAV = No"
+
+                    enhancedRow = enhancedRow + 1
+                    noED = noED + 1
 
                 End If
 
+            Else
+
+                results.Cells(enhancedRow, "A").Value = code
+                results.Cells(enhancedRow, "B").Value = judgeName
+                results.Cells(enhancedRow, "C").Value = "No"
+                results.Cells(enhancedRow, "D").Value = "Not Found"
+                results.Cells(enhancedRow, "E").Value = _
+                    "Missing from DFAS"
+
+                enhancedRow = enhancedRow + 1
+                missingED = missingED + 1
+
             End If
 
         End If
 
     Next r
 
-    If currentCodes.Count = 0 Or previousCodes.Count = 0 Then
-        Err.Raise vbObjectError + 704, , _
-            "Current or previous WebEx report has no IJ Codes."
-    End If
+    ' -------- WEBEX --------
 
-    ' Clear old results without removing headings
-    results.Range("A5:B10000").ClearContents
-    results.Range("D5:E10000").ClearContents
+    Set seen = CreateObject("Scripting.Dictionary")
+    seen.CompareMode = vbTextCompare
 
-    onRow = 5
-    offRow = 5
+    lastRow = webex.Cells( _
+        webex.Rows.Count, "D").End(xlUp).Row
 
-    ' Roll-ons
-    For Each key In currentCodes.Keys
+    For r = 2 To lastRow
 
-        If Not previousCodes.Exists(key) Then
+        code = UCase(Trim(CStr(webex.Cells(r, "D").Value)))
 
-            results.Cells(onRow, "A").Value = key
-            results.Cells(onRow, "B").Value = currentCodes(key)
+        If code <> "" And Not seen.Exists(code) Then
 
-            onRow = onRow + 1
+            seen.Add code, True
+
+            judgeName = Trim(CStr(webex.Cells(r, "B").Value)) _
+                & ", " & Trim(CStr(webex.Cells(r, "C").Value))
+
+            If dfasCodes.Exists(code) Then
+
+                details = dfasCodes(code)
+                vav = UCase(Trim(CStr(details(1))))
+
+                If vav = "NO" Then
+
+                    results.Cells(webexRow, "F").Value = code
+                    results.Cells(webexRow, "G").Value = details(0)
+                    results.Cells(webexRow, "H").Value = "No"
+                    results.Cells(webexRow, "I").Value = details(2)
+                    results.Cells(webexRow, "J").Value = "VAV = No"
+
+                    webexRow = webexRow + 1
+                    noWE = noWE + 1
+
+                End If
+
+            Else
+
+                results.Cells(webexRow, "F").Value = code
+                results.Cells(webexRow, "G").Value = judgeName
+                results.Cells(webexRow, "H").Value = "No"
+                results.Cells(webexRow, "I").Value = "Not Found"
+                results.Cells(webexRow, "J").Value = _
+                    "Missing from DFAS"
+
+                webexRow = webexRow + 1
+                missingWE = missingWE + 1
+
+            End If
 
         End If
 
-    Next key
+    Next r
 
-    ' Roll-offs
-    For Each key In previousCodes.Keys
+    tool.Range("B27").Value = "Complete"
 
-        If Not currentCodes.Exists(key) Then
-
-            results.Cells(offRow, "D").Value = key
-            results.Cells(offRow, "E").Value = previousCodes(key)
-
-            offRow = offRow + 1
-
-        End If
-
-    Next key
-
-    ' Record comparison dates
-    results.Range("A2").Value = "Current Report:"
-    results.Range("B2").Value = currentDate
-    results.Range("B2").NumberFormat = "mmm d, yyyy"
-
-    results.Range("D2").Value = "Previous Report:"
-    results.Range("E2").Value = CDate(previousDate)
-    results.Range("E2").NumberFormat = "mmm d, yyyy"
-
-    tool.Range("B26").Value = "Complete"
-
-    CompareWebEx = True
+    CheckDFASVAV = True
     Exit Function
 
-CompareFailed:
+CheckFailed:
 
     failureMessage = Err.Description
 
     If Not tool Is Nothing Then
-        tool.Range("B26").Value = "Failed"
+        tool.Range("B27").Value = "Failed"
         tool.Range("B11").Value = "Not Ready"
     End If
 
-    MsgBox "WebEx comparison failed: " & _
+    MsgBox "DFAS VAV verification failed: " & _
         failureMessage, vbCritical
 
-    CompareWebEx = False
+    CheckDFASVAV = False
 
 End Function
