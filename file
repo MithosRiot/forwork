@@ -1,132 +1,147 @@
-Function SaveEnhancedHistory() As Boolean
+Sub ImportFile(reportName As String, _
+    sheetName As String, statusRow As Long)
 
-    Dim src As Worksheet
-    Dim hist As Worksheet
-    Dim tool As Worksheet
-    Dim backup As Worksheet
+    Dim filePath As Variant
+    Dim srcWB As Workbook
+    Dim srcWS As Worksheet
+    Dim destWS As Worksheet
+    Dim toolWS As Worksheet
 
-    Dim reportDate As Date
-    Dim lastRow As Long
-    Dim nextRow As Long
-    Dim existingRow As Long
-    Dim r As Long
-
-    Dim backupComplete As Boolean
-    Dim historyModified As Boolean
+    Dim data As Variant
+    Dim rowCount As Long
+    Dim colCount As Long
+    Dim historySaved As Boolean
+    Dim needsHistory As Boolean
     Dim failureMessage As String
 
-    SaveEnhancedHistory = False
-    On Error GoTo SaveFailed
+    On Error GoTo ImportFailed
 
-    Set src = ThisWorkbook.Sheets( _
-        "Enhanced Detained - Excel Data")
+    Set toolWS = ThisWorkbook.Worksheets("Tool")
+    Set destWS = ThisWorkbook.Worksheets(sheetName)
 
-    Set hist = ThisWorkbook.Sheets( _
-        "History_enhancedDetained")
-
-    Set tool = ThisWorkbook.Sheets("Tool")
-    Set backup = ThisWorkbook.Sheets("History_Backup")
-
-    ' Validate reporting date
-    If Not IsDate(tool.Range("B3").Value) Then
-        Err.Raise vbObjectError + 301, , _
-            "Invalid reporting date."
+    If Not IsDate(toolWS.Range("B3").Value) Then
+        MsgBox "Select a valid reporting Friday.", _
+            vbExclamation
+        Exit Sub
     End If
 
-    reportDate = DateValue(tool.Range("B3").Value)
+    filePath = Application.GetOpenFilename( _
+        "Excel and CSV Files (*.xlsx;*.xlsm;*.csv)," & _
+        "*.xlsx;*.xlsm;*.csv", , _
+        "Select " & reportName & " Report")
 
-    ' Confirm imported data matches selected date
-    If Not IsDate(tool.Range("F6").Value) Then
-        Err.Raise vbObjectError + 302, , _
-            "Enhanced Detained import date is missing."
+    If VarType(filePath) = vbBoolean Then Exit Sub
+
+    Application.ScreenUpdating = False
+
+    Set srcWB = Workbooks.Open( _
+        Filename:=CStr(filePath), ReadOnly:=True)
+
+    Set srcWS = srcWB.Worksheets(1)
+
+    If srcWS.UsedRange.Row <> 1 Or _
+       srcWS.UsedRange.Column <> 1 Then
+
+        Err.Raise vbObjectError + 401, , _
+            "Source data must begin in cell A1."
+
     End If
 
-    If DateValue(tool.Range("F6").Value) <> reportDate Then
-        Err.Raise vbObjectError + 303, , _
-            "Enhanced Detained was imported for another date."
+    rowCount = srcWS.UsedRange.Rows.Count
+    colCount = srcWS.UsedRange.Columns.Count
+
+    If rowCount < 2 Then
+        Err.Raise vbObjectError + 402, , _
+            "The selected file contains no data rows."
     End If
 
-    ' Verify source data exists
-    lastRow = src.Cells(src.Rows.Count, "E").End(xlUp).Row
+    ' Read source data before replacing anything
+    data = srcWS.Range("A1").Resize( _
+        rowCount, colCount).Value
 
-    If lastRow < 2 Then
-        Err.Raise vbObjectError + 304, , _
-            "No Enhanced Detained data available."
+    srcWB.Close SaveChanges:=False
+    Set srcWB = Nothing
+
+    ' Replace the previous imported data
+    destWS.Cells.ClearContents
+
+    destWS.Range("A1").Resize( _
+        rowCount, colCount).Value = data
+
+    ' Record import information
+    toolWS.Cells(statusRow, 3).Value = Dir(CStr(filePath))
+    toolWS.Cells(statusRow, 4).Value = Now
+    toolWS.Cells(statusRow, 5).Value = rowCount - 1
+    toolWS.Cells(statusRow, 6).Value = _
+        DateValue(toolWS.Range("B3").Value)
+
+    toolWS.Cells(statusRow, 4).NumberFormat = _
+        "m/d/yyyy h:mm AM/PM"
+
+    toolWS.Cells(statusRow, 6).NumberFormat = _
+        "m/d/yyyy"
+
+    ' The dashboard needs to be rerun
+    toolWS.Range("B11").Value = "Out of Date"
+
+    needsHistory = False
+    historySaved = True
+
+    ' Automatically archive Enhanced Detained and WebEx
+    Select Case sheetName
+
+        Case "Enhanced Detained - Excel Data"
+
+            needsHistory = True
+            historySaved = SaveEnhancedHistory()
+
+        Case "Detained Ops IJ WebEx Data"
+
+            needsHistory = True
+            historySaved = SaveWebExHistory()
+
+    End Select
+
+    If needsHistory And Not historySaved Then
+
+        toolWS.Cells(statusRow, 2).Value = _
+            "Archive Failed"
+
+        toolWS.Range("B11").Value = "Not Ready"
+
+        Application.ScreenUpdating = True
+
+        MsgBox reportName & " data was imported, " & _
+            "but history could not be saved." & vbCrLf & _
+            "Do not run the Dashboard until resolved.", _
+            vbCritical
+
+        Exit Sub
+
     End If
 
-    ' Back up existing history
-    backup.Cells.Clear
-    hist.UsedRange.Copy Destination:=backup.Range("A1")
-    backupComplete = True
+    UpdateStatuses
 
-    ' Remove existing snapshot for this date
-    For existingRow = hist.Cells(hist.Rows.Count, "A") _
-        .End(xlUp).Row To 2 Step -1
+    Application.ScreenUpdating = True
 
-        If IsDate(hist.Cells(existingRow, "A").Value) Then
+    MsgBox reportName & " imported successfully.", _
+        vbInformation
 
-            If DateValue(hist.Cells(existingRow, "A").Value) = _
-                reportDate Then
+    Exit Sub
 
-                historyModified = True
-                hist.Rows(existingRow).Delete
-
-            End If
-
-        End If
-
-    Next existingRow
-
-    ' Save new snapshot
-    For r = 2 To lastRow
-
-        If Trim(CStr(src.Cells(r, "E").Value)) <> "" Then
-
-            nextRow = hist.Cells(hist.Rows.Count, "A") _
-                .End(xlUp).Row + 1
-
-            historyModified = True
-
-            hist.Cells(nextRow, "A").Value = reportDate
-            hist.Cells(nextRow, "B").Value = src.Cells(r, "E").Value
-            hist.Cells(nextRow, "C").Value = src.Cells(r, "C").Value
-            hist.Cells(nextRow, "D").Value = src.Cells(r, "F").Value
-            hist.Cells(nextRow, "E").Value = src.Cells(r, "A").Value
-            hist.Cells(nextRow, "F").Value = src.Cells(r, "I").Value
-
-        End If
-
-    Next r
-
-    hist.Columns("A").NumberFormat = "mm/dd/yyyy"
-
-    SaveEnhancedHistory = True
-    Exit Function
-
-SaveFailed:
+ImportFailed:
 
     failureMessage = Err.Description
 
-    If historyModified And backupComplete Then
+    On Error Resume Next
 
-        On Error Resume Next
-
-        Err.Clear
-        hist.Cells.Clear
-        backup.UsedRange.Copy Destination:=hist.Range("A1")
-
-        If Err.Number <> 0 Then
-            failureMessage = failureMessage & _
-                vbCrLf & "History restoration also failed."
-        End If
-
-        On Error GoTo 0
-
+    If Not srcWB Is Nothing Then
+        srcWB.Close SaveChanges:=False
     End If
 
-    MsgBox "Enhanced Detained history error: " & _
-        failureMessage, vbCritical
+    Application.ScreenUpdating = True
 
-    SaveEnhancedHistory = False
+    MsgBox "Import failed: " & failureMessage, _
+        vbCritical
 
-End Function
+End Sub
