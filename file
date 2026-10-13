@@ -1,4 +1,4 @@
-Function CompareEnhancedDetained() As Boolean
+Function CompareWebEx() As Boolean
 
     Dim ws As Worksheet
     Dim hist As Worksheet
@@ -13,28 +13,27 @@ Function CompareEnhancedDetained() As Boolean
     Dim lastRow As Long
     Dim r As Long
     Dim code As String
+    Dim judgeName As String
     Dim key As Variant
     Dim onRow As Long
     Dim offRow As Long
+    Dim failureMessage As String
 
-    CompareEnhancedDetained = False
-
+    CompareWebEx = False
     On Error GoTo CompareFailed
 
     Set tool = ThisWorkbook.Worksheets("Tool")
     Set ws = ThisWorkbook.Worksheets( _
-        "Enhanced Detained - Excel Data")
-    Set hist = ThisWorkbook.Worksheets( _
-        "History_enhancedDetained")
-    Set results = ThisWorkbook.Worksheets( _
-        "Results_EnhancedDetained")
+        "Detained Ops IJ WebEx Data")
+    Set hist = ThisWorkbook.Worksheets("History_webEx")
+    Set results = ThisWorkbook.Worksheets("Results_WebEx")
 
-    tool.Range("B25").Value = "Running"
+    tool.Range("B26").Value = "Running"
     tool.Range("B11").Value = "Out of Date"
     DoEvents
 
     If Not IsDate(tool.Range("B3").Value) Then
-        Err.Raise vbObjectError + 601, , _
+        Err.Raise vbObjectError + 701, , _
             "Invalid reporting date."
     End If
 
@@ -42,17 +41,17 @@ Function CompareEnhancedDetained() As Boolean
 
     UpdateStatuses
 
-    If tool.Range("B6").Value <> "Imported" Then
-        Err.Raise vbObjectError + 602, , _
-            "Current Enhanced Detained data is not ready."
+    If tool.Range("B7").Value <> "Imported" Then
+        Err.Raise vbObjectError + 702, , _
+            "Current WebEx data is not ready."
     End If
 
     previousDate = GetPreviousReportDate( _
-        "History_enhancedDetained", currentDate)
+        "History_webEx", currentDate)
 
     If IsEmpty(previousDate) Then
-        Err.Raise vbObjectError + 603, , _
-            "No previous Enhanced Detained report found."
+        Err.Raise vbObjectError + 703, , _
+            "No previous WebEx report found."
     End If
 
     Set currentCodes = CreateObject("Scripting.Dictionary")
@@ -61,22 +60,27 @@ Function CompareEnhancedDetained() As Boolean
     currentCodes.CompareMode = vbTextCompare
     previousCodes.CompareMode = vbTextCompare
 
-    ' Read unique IJ Codes from current report.
-    lastRow = ws.Cells(ws.Rows.Count, "E").End(xlUp).Row
+    ' Read unique current IJ Codes
+    lastRow = ws.Cells(ws.Rows.Count, "D").End(xlUp).Row
 
     For r = 2 To lastRow
 
-        code = UCase(Trim(CStr(ws.Cells(r, "E").Value)))
+        code = UCase(Trim(CStr(ws.Cells(r, "D").Value)))
 
         If code <> "" Then
+
+            judgeName = Trim(CStr(ws.Cells(r, "B").Value)) _
+                & ", " & Trim(CStr(ws.Cells(r, "C").Value))
+
             If Not currentCodes.Exists(code) Then
-                currentCodes.Add code, ws.Cells(r, "F").Value
+                currentCodes.Add code, judgeName
             End If
+
         End If
 
     Next r
 
-    ' Read unique IJ Codes from previous report.
+    ' Read unique previous IJ Codes
     lastRow = hist.Cells(hist.Rows.Count, "A").End(xlUp).Row
 
     For r = 2 To lastRow
@@ -90,10 +94,15 @@ Function CompareEnhancedDetained() As Boolean
                     hist.Cells(r, "B").Value)))
 
                 If code <> "" Then
+
+                    judgeName = Trim(CStr( _
+                        hist.Cells(r, "D").Value)) & ", " & _
+                        Trim(CStr(hist.Cells(r, "E").Value))
+
                     If Not previousCodes.Exists(code) Then
-                        previousCodes.Add code, _
-                            hist.Cells(r, "D").Value
+                        previousCodes.Add code, judgeName
                     End If
+
                 End If
 
             End If
@@ -103,25 +112,24 @@ Function CompareEnhancedDetained() As Boolean
     Next r
 
     If currentCodes.Count = 0 Or previousCodes.Count = 0 Then
-        Err.Raise vbObjectError + 604, , _
-            "Current or previous report has no IJ Codes."
+        Err.Raise vbObjectError + 704, , _
+            "Current or previous WebEx report has no IJ Codes."
     End If
 
-    ' Clear previous comparison results.
+    ' Clear old results without removing headings
     results.Range("A5:B10000").ClearContents
     results.Range("D5:E10000").ClearContents
 
     onRow = 5
     offRow = 5
 
-    ' Roll-ons: in current report, not previous.
+    ' Roll-ons
     For Each key In currentCodes.Keys
 
         If Not previousCodes.Exists(key) Then
 
             results.Cells(onRow, "A").Value = key
-            results.Cells(onRow, "B").Value = _
-                currentCodes(key)
+            results.Cells(onRow, "B").Value = currentCodes(key)
 
             onRow = onRow + 1
 
@@ -129,14 +137,13 @@ Function CompareEnhancedDetained() As Boolean
 
     Next key
 
-    ' Roll-offs: in previous report, not current.
+    ' Roll-offs
     For Each key In previousCodes.Keys
 
         If Not currentCodes.Exists(key) Then
 
             results.Cells(offRow, "D").Value = key
-            results.Cells(offRow, "E").Value = _
-                previousCodes(key)
+            results.Cells(offRow, "E").Value = previousCodes(key)
 
             offRow = offRow + 1
 
@@ -144,7 +151,7 @@ Function CompareEnhancedDetained() As Boolean
 
     Next key
 
-    ' Record comparison dates.
+    ' Record comparison dates
     results.Range("A2").Value = "Current Report:"
     results.Range("B2").Value = currentDate
     results.Range("B2").NumberFormat = "mmm d, yyyy"
@@ -153,20 +160,23 @@ Function CompareEnhancedDetained() As Boolean
     results.Range("E2").Value = CDate(previousDate)
     results.Range("E2").NumberFormat = "mmm d, yyyy"
 
-    tool.Range("B25").Value = "Complete"
+    tool.Range("B26").Value = "Complete"
 
-    CompareEnhancedDetained = True
-
+    CompareWebEx = True
     Exit Function
 
 CompareFailed:
 
-    tool.Range("B25").Value = "Failed"
-    tool.Range("B11").Value = "Not Ready"
+    failureMessage = Err.Description
 
-    MsgBox "Enhanced Detained comparison failed: " & _
-        Err.Description, vbCritical
+    If Not tool Is Nothing Then
+        tool.Range("B26").Value = "Failed"
+        tool.Range("B11").Value = "Not Ready"
+    End If
 
-    CompareEnhancedDetained = False
+    MsgBox "WebEx comparison failed: " & _
+        failureMessage, vbCritical
+
+    CompareWebEx = False
 
 End Function
