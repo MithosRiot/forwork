@@ -1,38 +1,236 @@
-Sub UpdatePreviousReportDates()
+Sub ImportPreviousEnhancedDetained()
+    ImportPreviousReport _
+        "Enhanced Detained", _
+        "History_enhancedDetained", _
+        "Enhanced Detained - Excel Data"
+End Sub
 
-    Dim ws As Worksheet
-    Dim currentDate As Date
-    Dim previousDate As Variant
+Sub ImportPreviousWebEx()
+    ImportPreviousReport _
+        "Detained Ops IJ WebEx", _
+        "History_webEx", _
+        "Detained Ops IJ WebEx Data"
+End Sub
 
-    Set ws = ThisWorkbook.Worksheets("Tool")
+Sub ImportPreviousReport( _
+    reportName As String, _
+    historySheet As String, _
+    reportType As String)
 
-    If Not IsDate(ws.Range("B3").Value) Then
-        ws.Range("B16:B17").ClearContents
+    Dim filePath As Variant
+    Dim dateInput As Variant
+    Dim reportDate As Date
+
+    Dim srcWB As Workbook
+    Dim srcWS As Worksheet
+    Dim hist As Worksheet
+    Dim backup As Worksheet
+
+    Dim lastRow As Long
+    Dim r As Long
+    Dim nextRow As Long
+    Dim existingRow As Long
+    Dim savedCount As Long
+
+    Dim oldLastRow As Long
+    Dim backupReady As Boolean
+    Dim historyModified As Boolean
+    Dim restoreError As Long
+    Dim errorMessage As String
+
+    On Error GoTo ImportFailed
+
+    ' Ask which reporting Friday the old file belongs to.
+    dateInput = Application.InputBox( _
+        "Enter the reporting Friday for " & reportName & _
+        vbCrLf & "Format: MM/DD/YYYY", _
+        "Previous Report Date", Type:=2)
+
+    If VarType(dateInput) = vbBoolean Then Exit Sub
+
+    If Not IsDate(dateInput) Then
+        MsgBox "Invalid date. Import cancelled.", vbExclamation
         Exit Sub
     End If
 
-    currentDate = DateValue(ws.Range("B3").Value)
+    reportDate = DateValue(CDate(dateInput))
 
-    ' Enhanced Detained previous report
-    previousDate = GetPreviousReportDate( _
-        "History_enhancedDetained", currentDate)
-
-    If IsEmpty(previousDate) Then
-        ws.Range("B16").Value = "Not Available"
-    Else
-        ws.Range("B16").Value = previousDate
-        ws.Range("B16").NumberFormat = "mmm d, yyyy"
+    If Weekday(reportDate, vbMonday) <> 5 Then
+        MsgBox "The reporting date must be a Friday.", _
+            vbExclamation
+        Exit Sub
     End If
 
-    ' WebEx previous report
-    previousDate = GetPreviousReportDate( _
-        "History_webEx", currentDate)
-
-    If IsEmpty(previousDate) Then
-        ws.Range("B17").Value = "Not Available"
-    Else
-        ws.Range("B17").Value = previousDate
-        ws.Range("B17").NumberFormat = "mmm d, yyyy"
+    If Not IsDate(ThisWorkbook.Sheets("Tool").Range("B3").Value) Then
+        MsgBox "Select a valid current reporting Friday.", vbExclamation
+        Exit Sub
     End If
+
+    If reportDate >= DateValue( _
+        ThisWorkbook.Sheets("Tool").Range("B3").Value) Then
+
+        MsgBox "The historical report must be earlier " & _
+            "than the selected reporting Friday.", vbExclamation
+        Exit Sub
+    End If
+
+    filePath = Application.GetOpenFilename( _
+        "Excel and CSV Files (*.xlsx;*.xlsm;*.csv)," & _
+        "*.xlsx;*.xlsm;*.csv", , _
+        "Select Previous " & reportName)
+
+    If VarType(filePath) = vbBoolean Then Exit Sub
+
+    Application.ScreenUpdating = False
+
+    Set srcWB = Workbooks.Open( _
+        Filename:=CStr(filePath), ReadOnly:=True)
+
+    ' WebEx uses a specific worksheet.
+    If reportType = "Detained Ops IJ WebEx Data" Then
+        Set srcWS = srcWB.Worksheets("IJ WebEX Info")
+    Else
+        Set srcWS = srcWB.Worksheets(1)
+    End If
+
+    ' Reject incorrect report layouts.
+    If Not ValidateReport(srcWS, reportType) Then
+        Err.Raise vbObjectError + 501, , _
+            "Historical report failed validation."
+    End If
+
+    Set hist = ThisWorkbook.Sheets(historySheet)
+    Set backup = ThisWorkbook.Sheets("History_Backup")
+
+    If reportType = "Enhanced Detained - Excel Data" Then
+        lastRow = srcWS.Cells(srcWS.Rows.Count, "E").End(xlUp).Row
+    Else
+        lastRow = srcWS.Cells(srcWS.Rows.Count, "D").End(xlUp).Row
+    End If
+
+    If lastRow < 2 Then
+        Err.Raise vbObjectError + 502, , _
+            "Historical report has no data rows."
+    End If
+
+    ' Back up history before modifying it.
+    backup.Cells.Clear
+    hist.UsedRange.Copy Destination:=backup.Range("A1")
+    backupReady = True
+
+    ' Remove an existing snapshot for this date.
+    oldLastRow = hist.Cells(hist.Rows.Count, "A").End(xlUp).Row
+
+    For existingRow = oldLastRow To 2 Step -1
+        If IsDate(hist.Cells(existingRow, "A").Value) Then
+
+            If DateValue(hist.Cells(existingRow, "A").Value) = _
+                reportDate Then
+
+                historyModified = True
+                hist.Rows(existingRow).Delete
+
+            End If
+
+        End If
+    Next existingRow
+
+    ' Save the previous report.
+    For r = 2 To lastRow
+
+        If reportType = "Enhanced Detained - Excel Data" Then
+
+            If Trim(CStr(srcWS.Cells(r, "E").Value)) <> "" Then
+
+                nextRow = hist.Cells(hist.Rows.Count, "A") _
+                    .End(xlUp).Row + 1
+
+                historyModified = True
+
+                hist.Cells(nextRow, "A").Value = reportDate
+                hist.Cells(nextRow, "B").Value = srcWS.Cells(r, "E").Value
+                hist.Cells(nextRow, "C").Value = srcWS.Cells(r, "C").Value
+                hist.Cells(nextRow, "D").Value = srcWS.Cells(r, "F").Value
+                hist.Cells(nextRow, "E").Value = srcWS.Cells(r, "A").Value
+                hist.Cells(nextRow, "F").Value = srcWS.Cells(r, "I").Value
+
+                savedCount = savedCount + 1
+            End If
+
+        Else
+
+            If Trim(CStr(srcWS.Cells(r, "D").Value)) <> "" Then
+
+                nextRow = hist.Cells(hist.Rows.Count, "A") _
+                    .End(xlUp).Row + 1
+
+                historyModified = True
+
+                hist.Cells(nextRow, "A").Value = reportDate
+                hist.Cells(nextRow, "B").Value = srcWS.Cells(r, "D").Value
+                hist.Cells(nextRow, "C").Value = srcWS.Cells(r, "J").Value
+                hist.Cells(nextRow, "D").Value = srcWS.Cells(r, "B").Value
+                hist.Cells(nextRow, "E").Value = srcWS.Cells(r, "C").Value
+                hist.Cells(nextRow, "F").Value = srcWS.Cells(r, "H").Value
+                hist.Cells(nextRow, "G").Value = srcWS.Cells(r, "I").Value
+
+                savedCount = savedCount + 1
+            End If
+
+        End If
+
+    Next r
+
+    If savedCount = 0 Then
+        Err.Raise vbObjectError + 503, , _
+            "No valid IJ records found in historical report."
+    End If
+
+    hist.Columns("A").NumberFormat = "mm/dd/yyyy"
+
+    srcWB.Close SaveChanges:=False
+    Set srcWB = Nothing
+
+    Application.ScreenUpdating = True
+
+    UpdatePreviousReportDates
+
+    ThisWorkbook.Sheets("Tool").Range("B11").Value = _
+        "Out of Date"
+
+    MsgBox reportName & " previous report saved." & _
+        vbCrLf & "Records: " & savedCount, vbInformation
+
+    Exit Sub
+
+ImportFailed:
+
+    errorMessage = Err.Description
+
+    On Error Resume Next
+
+    If backupReady And historyModified Then
+        Err.Clear
+
+        hist.Cells.Clear
+        backup.UsedRange.Copy Destination:=hist.Range("A1")
+
+        restoreError = Err.Number
+
+        If restoreError <> 0 Then
+            errorMessage = errorMessage & vbCrLf & _
+                "History restoration failed. Check History_Backup."
+        End If
+    End If
+
+    If Not srcWB Is Nothing Then
+        srcWB.Close SaveChanges:=False
+    End If
+
+    Application.ScreenUpdating = True
+    On Error GoTo 0
+
+    MsgBox "Historical import failed: " & errorMessage, _
+        vbCritical
 
 End Sub
