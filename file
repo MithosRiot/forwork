@@ -1,213 +1,74 @@
-Sub ImportFile(reportName As String, _
-    sheetName As String, statusRow As Long)
+Function ValidateReport( _
+    ws As Worksheet, reportType As String) As Boolean
 
-    Dim filePath As Variant
-    Dim srcWB As Workbook
-    Dim srcWS As Worksheet
-    Dim destWS As Worksheet
-    Dim toolWS As Worksheet
-    Dim backupWS As Worksheet
+    Dim headers As Variant
+    Dim positions As Variant
+    Dim i As Long
+    Dim actual As String
+    Dim expected As String
 
-    Dim data As Variant
-    Dim rowCount As Long
-    Dim colCount As Long
+    ValidateReport = False
 
-    Dim oldFileName As Variant
-    Dim oldImportTime As Variant
-    Dim oldRowCount As Variant
-    Dim oldReportDate As Variant
-    Dim oldDashboardStatus As Variant
-
-    Dim historySaved As Boolean
-    Dim needsHistory As Boolean
-    Dim backupComplete As Boolean
-    Dim destinationModified As Boolean
-    Dim restoreOK As Boolean
-    Dim failureMessage As String
-
-    On Error GoTo ImportFailed
-
-    Set toolWS = ThisWorkbook.Worksheets("Tool")
-    Set destWS = ThisWorkbook.Worksheets(sheetName)
-    Set backupWS = ThisWorkbook.Worksheets("Import_Backup")
-
-    ' Validate selected reporting date
-    If Not IsDate(toolWS.Range("B3").Value) Then
-        MsgBox "Select a valid reporting Friday.", _
-            vbExclamation
-        Exit Sub
-    End If
-
-    filePath = Application.GetOpenFilename( _
-        "Excel and CSV Files (*.xlsx;*.xlsm;*.csv)," & _
-        "*.xlsx;*.xlsm;*.csv", , _
-        "Select " & reportName & " Report")
-
-    If VarType(filePath) = vbBoolean Then Exit Sub
-
-    Application.ScreenUpdating = False
-
-    Set srcWB = Workbooks.Open( _
-        Filename:=CStr(filePath), ReadOnly:=True)
-
-    Set srcWS = srcWB.Worksheets(1)
-
-    ' Validate source data
-    If srcWS.UsedRange.Row <> 1 Or _
-       srcWS.UsedRange.Column <> 1 Then
-
-        Err.Raise vbObjectError + 401, , _
-            "Source data must begin in cell A1."
-
-    End If
-
-    rowCount = srcWS.UsedRange.Rows.Count
-    colCount = srcWS.UsedRange.Columns.Count
-
-    If rowCount < 2 Then
-        Err.Raise vbObjectError + 402, , _
-            "The selected file contains no data rows."
-    End If
-
-    data = srcWS.Range("A1").Resize( _
-        rowCount, colCount).Value
-
-    srcWB.Close SaveChanges:=False
-    Set srcWB = Nothing
-
-    ' Save existing import metadata
-    oldFileName = toolWS.Cells(statusRow, 3).Value
-    oldImportTime = toolWS.Cells(statusRow, 4).Value
-    oldRowCount = toolWS.Cells(statusRow, 5).Value
-    oldReportDate = toolWS.Cells(statusRow, 6).Value
-    oldDashboardStatus = toolWS.Range("B11").Value
-
-    ' Back up existing imported data
-    backupWS.Cells.Clear
-
-    If Application.WorksheetFunction.CountA( _
-        destWS.Cells) > 0 Then
-
-        destWS.UsedRange.Copy _
-            Destination:=backupWS.Range("A1")
-
-    End If
-
-    backupComplete = True
-
-    ' Replace current data
-    destinationModified = True
-
-    destWS.Cells.ClearContents
-
-    destWS.Range("A1").Resize( _
-        rowCount, colCount).Value = data
-
-    ' Record new import metadata
-    toolWS.Cells(statusRow, 3).Value = _
-        Dir(CStr(filePath))
-
-    toolWS.Cells(statusRow, 4).Value = Now
-    toolWS.Cells(statusRow, 5).Value = rowCount - 1
-
-    toolWS.Cells(statusRow, 6).Value = _
-        DateValue(toolWS.Range("B3").Value)
-
-    toolWS.Cells(statusRow, 4).NumberFormat = _
-        "m/d/yyyy h:mm AM/PM"
-
-    toolWS.Cells(statusRow, 6).NumberFormat = _
-        "m/d/yyyy"
-
-    ' Archive Enhanced Detained and WebEx
-    needsHistory = False
-    historySaved = True
-
-    Select Case sheetName
+    Select Case reportType
 
         Case "Enhanced Detained - Excel Data"
 
-            needsHistory = True
-            historySaved = SaveEnhancedHistory()
+            positions = Array(1, 3, 5, 6, 9)
+            headers = Array( _
+                "Base City Code", _
+                "Hearing Loc Code", _
+                "IJ Code", _
+                "IJ Name", _
+                "NFH Date")
 
         Case "Detained Ops IJ WebEx Data"
 
-            needsHistory = True
-            historySaved = SaveWebExHistory()
+            positions = Array(2, 3, 4, 8, 9, 10)
+            headers = Array( _
+                "Last Name", _
+                "First", _
+                "IJ Code", _
+                "Home Court", _
+                "Detail Court", _
+                "HLOC")
+
+        Case "DFAS EIOR Judge List Data"
+
+            positions = Array(1, 2, 5, 6)
+            headers = Array( _
+                "judge_code", _
+                "judge_name", _
+                "vav_court", _
+                "detail_court")
+
+        Case Else
+
+            MsgBox "Unknown report type: " & reportType, _
+                vbCritical
+            Exit Function
 
     End Select
 
-    If needsHistory And Not historySaved Then
+    For i = LBound(headers) To UBound(headers)
 
-        Err.Raise vbObjectError + 403, , _
-            "The historical snapshot could not be saved."
+        expected = LCase(Trim(CStr(headers(i))))
 
-    End If
+        actual = LCase(Trim(CStr( _
+            ws.Cells(1, positions(i)).Value)))
 
-    ' Import and archive succeeded
-    toolWS.Range("B11").Value = "Out of Date"
+        If actual <> expected Then
 
-    UpdateStatuses
+            MsgBox "Incorrect report format." & vbCrLf & _
+                "Expected column " & positions(i) & _
+                ": " & headers(i) & vbCrLf & _
+                "Found: " & actual, vbCritical
 
-    Application.ScreenUpdating = True
-
-    MsgBox reportName & " imported successfully.", _
-        vbInformation
-
-    Exit Sub
-
-ImportFailed:
-
-    failureMessage = Err.Description
-
-    On Error Resume Next
-
-    If Not srcWB Is Nothing Then
-        srcWB.Close SaveChanges:=False
-    End If
-
-    If destinationModified And backupComplete Then
-
-        Err.Clear
-
-        destWS.Cells.ClearContents
-
-        If Application.WorksheetFunction.CountA( _
-            backupWS.Cells) > 0 Then
-
-            backupWS.UsedRange.Copy _
-                Destination:=destWS.Range("A1")
+            Exit Function
 
         End If
 
-        restoreOK = (Err.Number = 0)
+    Next i
 
-        If restoreOK Then
+    ValidateReport = True
 
-            toolWS.Cells(statusRow, 3).Value = oldFileName
-            toolWS.Cells(statusRow, 4).Value = oldImportTime
-            toolWS.Cells(statusRow, 5).Value = oldRowCount
-            toolWS.Cells(statusRow, 6).Value = oldReportDate
-
-            toolWS.Range("B11").Value = oldDashboardStatus
-
-            UpdateStatuses
-
-        Else
-
-            failureMessage = failureMessage & vbCrLf & _
-                "Data restoration failed. Check Import_Backup."
-
-            toolWS.Range("B11").Value = "Not Ready"
-
-        End If
-
-    End If
-
-    Application.ScreenUpdating = True
-    On Error GoTo 0
-
-    MsgBox "Import failed: " & failureMessage, _
-        vbCritical
-
-End Sub
+End Function
