@@ -1,25 +1,43 @@
-' Select the correct source worksheet
-If sheetName = "Detained Ops IJ WebEx Data" Then
+Function GetPreviousReportDate( _
+    historySheet As String, _
+    currentDate As Date) As Variant
 
-    On Error Resume Next
-    Set srcWS = srcWB.Worksheets("IJ WebEX Info")
-    On Error GoTo ImportFailed
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim r As Long
+    Dim reportDate As Date
+    Dim previousDate As Date
+    Dim found As Boolean
 
-    If srcWS Is Nothing Then
-        Err.Raise vbObjectError + 405, , _
-            "The WebEx file is missing the IJ WebEX Info worksheet."
+    Set ws = ThisWorkbook.Worksheets(historySheet)
+
+    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    found = False
+
+    For r = 2 To lastRow
+
+        If IsDate(ws.Cells(r, "A").Value) Then
+
+            reportDate = DateValue(ws.Cells(r, "A").Value)
+
+            If reportDate < currentDate Then
+
+                If Not found Or reportDate > previousDate Then
+                    previousDate = reportDate
+                    found = True
+                End If
+
+            End If
+
+        End If
+
+    Next r
+
+    If found Then
+        GetPreviousReportDate = previousDate
+    Else
+        GetPreviousReportDate = Empty
     End If
 
-Else
-
-    Set srcWS = srcWB.Worksheets(1)
-
-End If
-
-' Validate the report's column headers
-If Not ValidateReport(srcWS, sheetName) Then
-    Err.Raise vbObjectError + 406, , _
-        "The selected file did not pass report validation."
-End If
-
-' Validate source data
+End Function
