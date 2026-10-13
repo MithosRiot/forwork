@@ -1,43 +1,15 @@
-Sub SaveEnhancedHistory()
+' Verify that the imported file belongs to the selected date
+If Not IsDate(tool.Range("F6").Value) Then
+    MsgBox "No valid import reporting date found.", vbExclamation
+    Exit Sub
+End If
 
-    Dim src As Worksheet
-    Dim hist As Worksheet
-    Dim tool As Worksheet
-    Dim reportDate As Date
-    Dim lastRow As Long
-    Dim nextRow As Long
-    Dim r As Long
+If CLng(CDate(tool.Range("F6").Value)) <> _
+   CLng(reportDate) Then
 
-    Set src = ThisWorkbook.Sheets( _
-        "Enhanced Detained - Excel Data")
+    MsgBox "Enhanced Detained was imported for a different " & _
+           "reporting date. Please import the correct file.", _
+           vbExclamation
+    Exit Sub
 
-    Set hist = ThisWorkbook.Sheets( _
-        "History_enhancedDetained")
-
-    Set tool = ThisWorkbook.Sheets("Tool")
-
-    reportDate = CDate(tool.Range("B3").Value)
-
-    lastRow = src.Cells(src.Rows.Count, "E").End(xlUp).Row
-
-    For r = 2 To lastRow
-
-        If Trim(CStr(src.Cells(r, "E").Value)) <> "" Then
-
-            nextRow = hist.Cells( _
-                hist.Rows.Count, "A").End(xlUp).Row + 1
-
-            hist.Cells(nextRow, "A").Value = reportDate
-            hist.Cells(nextRow, "B").Value = src.Cells(r, "E").Value
-            hist.Cells(nextRow, "C").Value = src.Cells(r, "C").Value
-            hist.Cells(nextRow, "D").Value = src.Cells(r, "F").Value
-            hist.Cells(nextRow, "E").Value = src.Cells(r, "A").Value
-            hist.Cells(nextRow, "F").Value = src.Cells(r, "I").Value
-
-        End If
-
-    Next r
-
-    MsgBox "Enhanced Detained history saved.", vbInformation
-
-End Sub
+End If
