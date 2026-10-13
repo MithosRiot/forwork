@@ -1,17 +1,113 @@
-' Invalidate the previous dashboard result.
-toolWS.Range("B11").Value = "Out of Date"
+Function SaveWebExHistory() As Boolean
 
-UpdateStatuses
+    Dim src As Worksheet
+    Dim hist As Worksheet
+    Dim tool As Worksheet
+    Dim reportDate As Date
+    Dim lastRow As Long
+    Dim nextRow As Long
+    Dim existingRow As Long
+    Dim r As Long
+    Dim backup As Worksheet
+    Dim backupComplete As Boolean
+    Dim historyModified As Boolean
+    Dim failureMessage As String
 
-' Preserve the imported report in history.
-Select Case sheetName
+    SaveWebExHistory = False
+    On Error GoTo SaveFailed
 
-    Case "Enhanced Detained - Excel Data"
-        SaveEnhancedHistory
+    Set src = ThisWorkbook.Sheets("Detained Ops IJ WebEx Data")
+    Set hist = ThisWorkbook.Sheets("History_webEx")
+    Set tool = ThisWorkbook.Sheets("Tool")
+    Set backup = ThisWorkbook.Sheets("History_Backup")
 
-    Case "Detained Ops IJ WebEx Data"
-        SaveWebExHistory
+    If Not IsDate(tool.Range("B3").Value) Then
+        Err.Raise vbObjectError + 201, , "Invalid reporting date."
+    End If
 
-End Select
+    reportDate = DateValue(tool.Range("B3").Value)
 
-Application.ScreenUpdating = True
+    If Not IsDate(tool.Range("F7").Value) Then
+        Err.Raise vbObjectError + 202, , _
+            "WebEx import reporting date is missing."
+    End If
+
+    If DateValue(tool.Range("F7").Value) <> reportDate Then
+        Err.Raise vbObjectError + 203, , _
+            "WebEx was imported for a different reporting date."
+    End If
+
+    lastRow = src.Cells(src.Rows.Count, "D").End(xlUp).Row
+
+    If lastRow < 2 Then
+        Err.Raise vbObjectError + 204, , _
+            "No WebEx data available to archive."
+    End If
+
+    backup.Cells.Clear
+    hist.UsedRange.Copy Destination:=backup.Range("A1")
+    backupComplete = True
+
+    For existingRow = hist.Cells(hist.Rows.Count, "A") _
+        .End(xlUp).Row To 2 Step -1
+
+        If IsDate(hist.Cells(existingRow, "A").Value) Then
+            If DateValue(hist.Cells(existingRow, "A").Value) = reportDate Then
+                historyModified = True
+                hist.Rows(existingRow).Delete
+            End If
+        End If
+
+    Next existingRow
+
+    For r = 2 To lastRow
+
+        If Trim(CStr(src.Cells(r, "D").Value)) <> "" Then
+
+            nextRow = hist.Cells(hist.Rows.Count, "A") _
+                .End(xlUp).Row + 1
+
+            historyModified = True
+
+            hist.Cells(nextRow, "A").Value = reportDate
+            hist.Cells(nextRow, "B").Value = src.Cells(r, "D").Value
+            hist.Cells(nextRow, "C").Value = src.Cells(r, "J").Value
+            hist.Cells(nextRow, "D").Value = src.Cells(r, "B").Value
+            hist.Cells(nextRow, "E").Value = src.Cells(r, "C").Value
+            hist.Cells(nextRow, "F").Value = src.Cells(r, "H").Value
+            hist.Cells(nextRow, "G").Value = src.Cells(r, "I").Value
+
+        End If
+
+    Next r
+
+    hist.Columns("A").NumberFormat = "mm/dd/yyyy"
+
+    SaveWebExHistory = True
+    Exit Function
+
+SaveFailed:
+
+    failureMessage = Err.Description
+
+    If historyModified And backupComplete Then
+
+        On Error Resume Next
+
+        hist.Cells.Clear
+        backup.UsedRange.Copy Destination:=hist.Range("A1")
+
+        If Err.Number <> 0 Then
+            failureMessage = failureMessage & _
+                vbCrLf & "History restoration also failed."
+        End If
+
+        On Error GoTo 0
+
+    End If
+
+    MsgBox "WebEx history error: " & failureMessage, vbCritical
+
+    SaveWebExHistory = False
+
+End Function
