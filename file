@@ -1,236 +1,131 @@
-Sub ImportPreviousEnhancedDetained()
-    ImportPreviousReport _
-        "Enhanced Detained", _
-        "History_enhancedDetained", _
-        "Enhanced Detained - Excel Data"
-End Sub
+Sub CompareEnhancedDetained()
 
-Sub ImportPreviousWebEx()
-    ImportPreviousReport _
-        "Detained Ops IJ WebEx", _
-        "History_webEx", _
-        "Detained Ops IJ WebEx Data"
-End Sub
-
-Sub ImportPreviousReport( _
-    reportName As String, _
-    historySheet As String, _
-    reportType As String)
-
-    Dim filePath As Variant
-    Dim dateInput As Variant
-    Dim reportDate As Date
-
-    Dim srcWB As Workbook
-    Dim srcWS As Worksheet
+    Dim ws As Worksheet
     Dim hist As Worksheet
-    Dim backup As Worksheet
+    Dim dash As Worksheet
+    Dim tool As Worksheet
 
+    Dim currentCodes As Object
+    Dim previousCodes As Object
+
+    Dim currentDate As Date
+    Dim previousDate As Variant
     Dim lastRow As Long
     Dim r As Long
-    Dim nextRow As Long
-    Dim existingRow As Long
-    Dim savedCount As Long
+    Dim code As String
+    Dim key As Variant
+    Dim onRow As Long
+    Dim offRow As Long
 
-    Dim oldLastRow As Long
-    Dim backupReady As Boolean
-    Dim historyModified As Boolean
-    Dim restoreError As Long
-    Dim errorMessage As String
+    Set ws = ThisWorkbook.Worksheets( _
+        "Enhanced Detained - Excel Data")
+    Set hist = ThisWorkbook.Worksheets( _
+        "History_enhancedDetained")
+    Set dash = ThisWorkbook.Worksheets("Dashboard")
+    Set tool = ThisWorkbook.Worksheets("Tool")
 
-    On Error GoTo ImportFailed
+    Set currentCodes = CreateObject("Scripting.Dictionary")
+    Set previousCodes = CreateObject("Scripting.Dictionary")
 
-    ' Ask which reporting Friday the old file belongs to.
-    dateInput = Application.InputBox( _
-        "Enter the reporting Friday for " & reportName & _
-        vbCrLf & "Format: MM/DD/YYYY", _
-        "Previous Report Date", Type:=2)
-
-    If VarType(dateInput) = vbBoolean Then Exit Sub
-
-    If Not IsDate(dateInput) Then
-        MsgBox "Invalid date. Import cancelled.", vbExclamation
+    If Not IsDate(tool.Range("B3").Value) Then
+        MsgBox "Select a valid reporting date.", vbExclamation
         Exit Sub
     End If
 
-    reportDate = DateValue(CDate(dateInput))
+    currentDate = DateValue(tool.Range("B3").Value)
 
-    If Weekday(reportDate, vbMonday) <> 5 Then
-        MsgBox "The reporting date must be a Friday.", _
+    previousDate = GetPreviousReportDate( _
+        "History_enhancedDetained", currentDate)
+
+    If IsEmpty(previousDate) Then
+        MsgBox "No previous Enhanced Detained report found.", _
             vbExclamation
         Exit Sub
     End If
 
-    If Not IsDate(ThisWorkbook.Sheets("Tool").Range("B3").Value) Then
-        MsgBox "Select a valid current reporting Friday.", vbExclamation
-        Exit Sub
-    End If
+    currentCodes.CompareMode = vbTextCompare
+    previousCodes.CompareMode = vbTextCompare
 
-    If reportDate >= DateValue( _
-        ThisWorkbook.Sheets("Tool").Range("B3").Value) Then
+    ' Read unique IJ Codes from current report.
+    lastRow = ws.Cells(ws.Rows.Count, "E").End(xlUp).Row
 
-        MsgBox "The historical report must be earlier " & _
-            "than the selected reporting Friday.", vbExclamation
-        Exit Sub
-    End If
-
-    filePath = Application.GetOpenFilename( _
-        "Excel and CSV Files (*.xlsx;*.xlsm;*.csv)," & _
-        "*.xlsx;*.xlsm;*.csv", , _
-        "Select Previous " & reportName)
-
-    If VarType(filePath) = vbBoolean Then Exit Sub
-
-    Application.ScreenUpdating = False
-
-    Set srcWB = Workbooks.Open( _
-        Filename:=CStr(filePath), ReadOnly:=True)
-
-    ' WebEx uses a specific worksheet.
-    If reportType = "Detained Ops IJ WebEx Data" Then
-        Set srcWS = srcWB.Worksheets("IJ WebEX Info")
-    Else
-        Set srcWS = srcWB.Worksheets(1)
-    End If
-
-    ' Reject incorrect report layouts.
-    If Not ValidateReport(srcWS, reportType) Then
-        Err.Raise vbObjectError + 501, , _
-            "Historical report failed validation."
-    End If
-
-    Set hist = ThisWorkbook.Sheets(historySheet)
-    Set backup = ThisWorkbook.Sheets("History_Backup")
-
-    If reportType = "Enhanced Detained - Excel Data" Then
-        lastRow = srcWS.Cells(srcWS.Rows.Count, "E").End(xlUp).Row
-    Else
-        lastRow = srcWS.Cells(srcWS.Rows.Count, "D").End(xlUp).Row
-    End If
-
-    If lastRow < 2 Then
-        Err.Raise vbObjectError + 502, , _
-            "Historical report has no data rows."
-    End If
-
-    ' Back up history before modifying it.
-    backup.Cells.Clear
-    hist.UsedRange.Copy Destination:=backup.Range("A1")
-    backupReady = True
-
-    ' Remove an existing snapshot for this date.
-    oldLastRow = hist.Cells(hist.Rows.Count, "A").End(xlUp).Row
-
-    For existingRow = oldLastRow To 2 Step -1
-        If IsDate(hist.Cells(existingRow, "A").Value) Then
-
-            If DateValue(hist.Cells(existingRow, "A").Value) = _
-                reportDate Then
-
-                historyModified = True
-                hist.Rows(existingRow).Delete
-
-            End If
-
-        End If
-    Next existingRow
-
-    ' Save the previous report.
     For r = 2 To lastRow
 
-        If reportType = "Enhanced Detained - Excel Data" Then
+        code = UCase(Trim(CStr(ws.Cells(r, "E").Value)))
 
-            If Trim(CStr(srcWS.Cells(r, "E").Value)) <> "" Then
-
-                nextRow = hist.Cells(hist.Rows.Count, "A") _
-                    .End(xlUp).Row + 1
-
-                historyModified = True
-
-                hist.Cells(nextRow, "A").Value = reportDate
-                hist.Cells(nextRow, "B").Value = srcWS.Cells(r, "E").Value
-                hist.Cells(nextRow, "C").Value = srcWS.Cells(r, "C").Value
-                hist.Cells(nextRow, "D").Value = srcWS.Cells(r, "F").Value
-                hist.Cells(nextRow, "E").Value = srcWS.Cells(r, "A").Value
-                hist.Cells(nextRow, "F").Value = srcWS.Cells(r, "I").Value
-
-                savedCount = savedCount + 1
+        If code <> "" Then
+            If Not currentCodes.Exists(code) Then
+                currentCodes.Add code, ws.Cells(r, "F").Value
             End If
+        End If
 
-        Else
+    Next r
 
-            If Trim(CStr(srcWS.Cells(r, "D").Value)) <> "" Then
+    ' Read unique IJ Codes from previous snapshot.
+    lastRow = hist.Cells(hist.Rows.Count, "A").End(xlUp).Row
 
-                nextRow = hist.Cells(hist.Rows.Count, "A") _
-                    .End(xlUp).Row + 1
+    For r = 2 To lastRow
 
-                historyModified = True
+        If IsDate(hist.Cells(r, "A").Value) Then
 
-                hist.Cells(nextRow, "A").Value = reportDate
-                hist.Cells(nextRow, "B").Value = srcWS.Cells(r, "D").Value
-                hist.Cells(nextRow, "C").Value = srcWS.Cells(r, "J").Value
-                hist.Cells(nextRow, "D").Value = srcWS.Cells(r, "B").Value
-                hist.Cells(nextRow, "E").Value = srcWS.Cells(r, "C").Value
-                hist.Cells(nextRow, "F").Value = srcWS.Cells(r, "H").Value
-                hist.Cells(nextRow, "G").Value = srcWS.Cells(r, "I").Value
+            If DateValue(hist.Cells(r, "A").Value) = _
+                CDate(previousDate) Then
 
-                savedCount = savedCount + 1
+                code = UCase(Trim(CStr(hist.Cells(r, "B").Value)))
+
+                If code <> "" Then
+                    If Not previousCodes.Exists(code) Then
+                        previousCodes.Add code, _
+                            hist.Cells(r, "D").Value
+                    End If
+                End If
+
             End If
 
         End If
 
     Next r
 
-    If savedCount = 0 Then
-        Err.Raise vbObjectError + 503, , _
-            "No valid IJ records found in historical report."
+    If currentCodes.Count = 0 Or previousCodes.Count = 0 Then
+        MsgBox "One of the report snapshots has no IJ Codes.", _
+            vbExclamation
+        Exit Sub
     End If
 
-    hist.Columns("A").NumberFormat = "mm/dd/yyyy"
+    ' Clear only the Enhanced Detained result areas.
+    dash.Range("A11:B10000").ClearContents
+    dash.Range("D11:E10000").ClearContents
 
-    srcWB.Close SaveChanges:=False
-    Set srcWB = Nothing
+    onRow = 11
+    offRow = 11
 
-    Application.ScreenUpdating = True
+    ' Roll-Ons: current but not previous.
+    For Each key In currentCodes.Keys
 
-    UpdatePreviousReportDates
-
-    ThisWorkbook.Sheets("Tool").Range("B11").Value = _
-        "Out of Date"
-
-    MsgBox reportName & " previous report saved." & _
-        vbCrLf & "Records: " & savedCount, vbInformation
-
-    Exit Sub
-
-ImportFailed:
-
-    errorMessage = Err.Description
-
-    On Error Resume Next
-
-    If backupReady And historyModified Then
-        Err.Clear
-
-        hist.Cells.Clear
-        backup.UsedRange.Copy Destination:=hist.Range("A1")
-
-        restoreError = Err.Number
-
-        If restoreError <> 0 Then
-            errorMessage = errorMessage & vbCrLf & _
-                "History restoration failed. Check History_Backup."
+        If Not previousCodes.Exists(key) Then
+            dash.Cells(onRow, "A").Value = key
+            dash.Cells(onRow, "B").Value = currentCodes(key)
+            onRow = onRow + 1
         End If
-    End If
 
-    If Not srcWB Is Nothing Then
-        srcWB.Close SaveChanges:=False
-    End If
+    Next key
 
-    Application.ScreenUpdating = True
-    On Error GoTo 0
+    ' Roll-Offs: previous but not current.
+    For Each key In previousCodes.Keys
 
-    MsgBox "Historical import failed: " & errorMessage, _
-        vbCritical
+        If Not currentCodes.Exists(key) Then
+            dash.Cells(offRow, "D").Value = key
+            dash.Cells(offRow, "E").Value = previousCodes(key)
+            offRow = offRow + 1
+        End If
+
+    Next key
+
+    dash.Range("B4").Value = CDate(previousDate)
+    dash.Range("B4").NumberFormat = "mmm d, yyyy"
+
+    MsgBox "Enhanced Detained comparison complete." & vbCrLf & _
+        "Roll-Ons: " & onRow - 11 & vbCrLf & _
+        "Roll-Offs: " & offRow - 11, vbInformation
 
 End Sub
