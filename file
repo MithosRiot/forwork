@@ -2,7 +2,7 @@ Sub CompareEnhancedDetained()
 
     Dim ws As Worksheet
     Dim hist As Worksheet
-    Dim dash As Worksheet
+    Dim results As Worksheet
     Dim tool As Worksheet
 
     Dim currentCodes As Object
@@ -17,16 +17,26 @@ Sub CompareEnhancedDetained()
     Dim onRow As Long
     Dim offRow As Long
 
+    On Error GoTo CompareFailed
+
     Set ws = ThisWorkbook.Worksheets( _
         "Enhanced Detained - Excel Data")
+
     Set hist = ThisWorkbook.Worksheets( _
         "History_enhancedDetained")
-    Set dash = ThisWorkbook.Worksheets("Dashboard")
+
+    Set results = ThisWorkbook.Worksheets( _
+        "Results_EnhancedDetained")
+
     Set tool = ThisWorkbook.Worksheets("Tool")
 
     Set currentCodes = CreateObject("Scripting.Dictionary")
     Set previousCodes = CreateObject("Scripting.Dictionary")
 
+    currentCodes.CompareMode = vbTextCompare
+    previousCodes.CompareMode = vbTextCompare
+
+    ' Validate the selected reporting date
     If Not IsDate(tool.Range("B3").Value) Then
         MsgBox "Select a valid reporting date.", vbExclamation
         Exit Sub
@@ -34,6 +44,14 @@ Sub CompareEnhancedDetained()
 
     currentDate = DateValue(tool.Range("B3").Value)
 
+    ' Ensure the current imported report is selected
+    If tool.Range("B6").Value <> "Imported" Then
+        MsgBox "Import the current Enhanced Detained report.", _
+            vbExclamation
+        Exit Sub
+    End If
+
+    ' Find the most recent previous report
     previousDate = GetPreviousReportDate( _
         "History_enhancedDetained", currentDate)
 
@@ -43,10 +61,7 @@ Sub CompareEnhancedDetained()
         Exit Sub
     End If
 
-    currentCodes.CompareMode = vbTextCompare
-    previousCodes.CompareMode = vbTextCompare
-
-    ' Read unique IJ Codes from current report.
+    ' Read unique IJ Codes from the current report
     lastRow = ws.Cells(ws.Rows.Count, "E").End(xlUp).Row
 
     For r = 2 To lastRow
@@ -61,7 +76,7 @@ Sub CompareEnhancedDetained()
 
     Next r
 
-    ' Read unique IJ Codes from previous snapshot.
+    ' Read unique IJ Codes from previous history
     lastRow = hist.Cells(hist.Rows.Count, "A").End(xlUp).Row
 
     For r = 2 To lastRow
@@ -87,45 +102,70 @@ Sub CompareEnhancedDetained()
     Next r
 
     If currentCodes.Count = 0 Or previousCodes.Count = 0 Then
-        MsgBox "One of the report snapshots has no IJ Codes.", _
+        MsgBox "One of the reports contains no IJ Codes.", _
             vbExclamation
         Exit Sub
     End If
 
-    ' Clear only the Enhanced Detained result areas.
-    dash.Range("A11:B10000").ClearContents
-    dash.Range("D11:E10000").ClearContents
+    ' Clear previous results, preserving headings
+    results.Range("A5:B10000").ClearContents
+    results.Range("D5:E10000").ClearContents
 
-    onRow = 11
-    offRow = 11
+    onRow = 5
+    offRow = 5
 
-    ' Roll-Ons: current but not previous.
+    ' ROLL-ONS:
+    ' IJ Codes present now but absent previously
     For Each key In currentCodes.Keys
 
         If Not previousCodes.Exists(key) Then
-            dash.Cells(onRow, "A").Value = key
-            dash.Cells(onRow, "B").Value = currentCodes(key)
+
+            results.Cells(onRow, "A").Value = key
+            results.Cells(onRow, "B").Value = _
+                currentCodes(key)
+
             onRow = onRow + 1
+
         End If
 
     Next key
 
-    ' Roll-Offs: previous but not current.
+    ' ROLL-OFFS:
+    ' IJ Codes previously present but absent now
     For Each key In previousCodes.Keys
 
         If Not currentCodes.Exists(key) Then
-            dash.Cells(offRow, "D").Value = key
-            dash.Cells(offRow, "E").Value = previousCodes(key)
+
+            results.Cells(offRow, "D").Value = key
+            results.Cells(offRow, "E").Value = _
+                previousCodes(key)
+
             offRow = offRow + 1
+
         End If
 
     Next key
 
-    dash.Range("B4").Value = CDate(previousDate)
-    dash.Range("B4").NumberFormat = "mmm d, yyyy"
+    ' Record comparison dates
+    results.Range("A2").Value = "Current Report:"
+    results.Range("B2").Value = currentDate
+    results.Range("B2").NumberFormat = "mmm d, yyyy"
 
-    MsgBox "Enhanced Detained comparison complete." & vbCrLf & _
-        "Roll-Ons: " & onRow - 11 & vbCrLf & _
-        "Roll-Offs: " & offRow - 11, vbInformation
+    results.Range("D2").Value = "Previous Report:"
+    results.Range("E2").Value = CDate(previousDate)
+    results.Range("E2").NumberFormat = "mmm d, yyyy"
+
+    MsgBox "Enhanced Detained comparison complete." & _
+        vbCrLf & vbCrLf & _
+        "Roll-Ons: " & (onRow - 5) & vbCrLf & _
+        "Roll-Offs: " & (offRow - 5), _
+        vbInformation
+
+    Exit Sub
+
+CompareFailed:
+
+    MsgBox "Enhanced Detained comparison failed: " & _
+        Err.Description, vbCritical
 
 End Sub
