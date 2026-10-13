@@ -1,57 +1,60 @@
-Function CheckDFASVAV() As Boolean
+Function CheckDFASHLOC() As Boolean
 
     Dim tool As Worksheet
     Dim dfas As Worksheet
-    Dim enhanced As Worksheet
+    Dim ed As Worksheet
     Dim webex As Worksheet
     Dim results As Worksheet
 
     Dim dfasCodes As Object
     Dim seen As Object
-    Dim details As Variant
 
     Dim lastRow As Long
     Dim r As Long
     Dim code As String
-    Dim vav As String
+    Dim hloc As String
+    Dim homeCourt As String
+    Dim detailCourts As String
     Dim judgeName As String
+    Dim issue As String
+    Dim key As String
 
-    Dim enhancedRow As Long
+    Dim edRow As Long
     Dim webexRow As Long
-    Dim missingED As Long
-    Dim missingWE As Long
-    Dim noED As Long
-    Dim noWE As Long
+    Dim sameRow As Long
     Dim failureMessage As String
 
-    CheckDFASVAV = False
+    CheckDFASHLOC = False
     On Error GoTo CheckFailed
 
     Set tool = ThisWorkbook.Worksheets("Tool")
     Set dfas = ThisWorkbook.Worksheets( _
         "DFAS EIOR Judge List Data")
-    Set enhanced = ThisWorkbook.Worksheets( _
+    Set ed = ThisWorkbook.Worksheets( _
         "Enhanced Detained - Excel Data")
     Set webex = ThisWorkbook.Worksheets( _
         "Detained Ops IJ WebEx Data")
-    Set results = ThisWorkbook.Worksheets("Results_DFAS")
+    Set results = ThisWorkbook.Worksheets("Results_HLOC")
 
-    tool.Range("B27").Value = "Running"
+    tool.Range("B28").Value = "Running"
     tool.Range("B11").Value = "Out of Date"
     DoEvents
 
+    ' Verify current imports
     UpdateStatuses
 
     For r = 6 To 8
+
         If tool.Cells(r, "B").Value <> "Imported" Then
-            Err.Raise vbObjectError + 801, , _
+            Err.Raise vbObjectError + 901, , _
                 "All three current reports must be imported."
         End If
+
     Next r
 
-    ' Build DFAS lookup.
-    ' A = IJ Code, B = Judge Name
-    ' C = Court, E = VAV Court
+    ' Build DFAS lookup:
+    ' Column A = IJ Code
+    ' Column F = Detail Court
     Set dfasCodes = CreateObject("Scripting.Dictionary")
     dfasCodes.CompareMode = vbTextCompare
 
@@ -62,76 +65,81 @@ Function CheckDFASVAV() As Boolean
         code = UCase(Trim(CStr(dfas.Cells(r, "A").Value)))
 
         If code <> "" Then
+
             If Not dfasCodes.Exists(code) Then
-
-                dfasCodes.Add code, Array( _
-                    dfas.Cells(r, "B").Value, _
-                    dfas.Cells(r, "E").Value, _
-                    dfas.Cells(r, "C").Value)
-
+                dfasCodes.Add code, _
+                    CStr(dfas.Cells(r, "F").Value)
             End If
+
         End If
 
     Next r
 
     If dfasCodes.Count = 0 Then
-        Err.Raise vbObjectError + 802, , _
-            "No valid IJ Codes found in DFAS."
+        Err.Raise vbObjectError + 902, , _
+            "No IJ Codes found in DFAS."
     End If
 
-    ' Preserve headings while clearing old results.
+    ' Clear previous results, preserving headings
     results.Range("A5:E10000").ClearContents
-    results.Range("F5:J10000").ClearContents
+    results.Range("G5:K10000").ClearContents
+    results.Range("M5:Q10000").ClearContents
 
-    enhancedRow = 5
+    edRow = 5
     webexRow = 5
+    sameRow = 5
 
-    ' -------- ENHANCED DETAINED --------
+    ' ---------------------------------
+    ' ENHANCED DETAINED HLOC CHECK
+    ' ---------------------------------
 
     Set seen = CreateObject("Scripting.Dictionary")
     seen.CompareMode = vbTextCompare
 
-    lastRow = enhanced.Cells( _
-        enhanced.Rows.Count, "E").End(xlUp).Row
+    lastRow = ed.Cells(ed.Rows.Count, "E").End(xlUp).Row
 
     For r = 2 To lastRow
 
-        code = UCase(Trim(CStr(enhanced.Cells(r, "E").Value)))
+        code = UCase(Trim(CStr(ed.Cells(r, "E").Value)))
+        hloc = UCase(Trim(CStr(ed.Cells(r, "C").Value)))
+        judgeName = Trim(CStr(ed.Cells(r, "F").Value))
 
-        If code <> "" And Not seen.Exists(code) Then
+        If code <> "" And hloc <> "" Then
 
-            seen.Add code, True
-            judgeName = CStr(enhanced.Cells(r, "F").Value)
+            key = code & "|" & hloc
 
-            If dfasCodes.Exists(code) Then
+            If Not seen.Exists(key) Then
 
-                details = dfasCodes(code)
-                vav = UCase(Trim(CStr(details(1))))
+                seen.Add key, True
 
-                If vav = "NO" Then
+                detailCourts = ""
+                issue = ""
 
-                    results.Cells(enhancedRow, "A").Value = code
-                    results.Cells(enhancedRow, "B").Value = details(0)
-                    results.Cells(enhancedRow, "C").Value = "No"
-                    results.Cells(enhancedRow, "D").Value = details(2)
-                    results.Cells(enhancedRow, "E").Value = "VAV = No"
+                If Not dfasCodes.Exists(code) Then
 
-                    enhancedRow = enhancedRow + 1
-                    noED = noED + 1
+                    issue = "IJ Missing from DFAS"
+
+                Else
+
+                    detailCourts = CStr(dfasCodes(code))
+
+                    If Not HLOCInList(hloc, detailCourts) Then
+                        issue = "Missing HLOC"
+                    End If
 
                 End If
 
-            Else
+                If issue <> "" Then
 
-                results.Cells(enhancedRow, "A").Value = code
-                results.Cells(enhancedRow, "B").Value = judgeName
-                results.Cells(enhancedRow, "C").Value = "No"
-                results.Cells(enhancedRow, "D").Value = "Not Found"
-                results.Cells(enhancedRow, "E").Value = _
-                    "Missing from DFAS"
+                    results.Cells(edRow, "A").Value = code
+                    results.Cells(edRow, "B").Value = judgeName
+                    results.Cells(edRow, "C").Value = hloc
+                    results.Cells(edRow, "D").Value = detailCourts
+                    results.Cells(edRow, "E").Value = issue
 
-                enhancedRow = enhancedRow + 1
-                missingED = missingED + 1
+                    edRow = edRow + 1
+
+                End If
 
             End If
 
@@ -139,54 +147,74 @@ Function CheckDFASVAV() As Boolean
 
     Next r
 
-    ' -------- WEBEX --------
+    ' ---------------------------------
+    ' WEBEX HLOC CHECK
+    ' ---------------------------------
 
     Set seen = CreateObject("Scripting.Dictionary")
     seen.CompareMode = vbTextCompare
 
-    lastRow = webex.Cells( _
-        webex.Rows.Count, "D").End(xlUp).Row
+    lastRow = webex.Cells(webex.Rows.Count, "D").End(xlUp).Row
 
     For r = 2 To lastRow
 
         code = UCase(Trim(CStr(webex.Cells(r, "D").Value)))
+        hloc = UCase(Trim(CStr(webex.Cells(r, "J").Value)))
+        homeCourt = UCase(Trim(CStr(webex.Cells(r, "H").Value)))
 
-        If code <> "" And Not seen.Exists(code) Then
+        judgeName = Trim(CStr(webex.Cells(r, "B").Value)) _
+            & ", " & Trim(CStr(webex.Cells(r, "C").Value))
 
-            seen.Add code, True
+        If code <> "" And hloc <> "" Then
 
-            judgeName = Trim(CStr(webex.Cells(r, "B").Value)) _
-                & ", " & Trim(CStr(webex.Cells(r, "C").Value))
+            key = code & "|" & hloc
 
-            If dfasCodes.Exists(code) Then
+            If Not seen.Exists(key) Then
 
-                details = dfasCodes(code)
-                vav = UCase(Trim(CStr(details(1))))
+                seen.Add key, True
 
-                If vav = "NO" Then
+                detailCourts = ""
+                issue = ""
 
-                    results.Cells(webexRow, "F").Value = code
-                    results.Cells(webexRow, "G").Value = details(0)
-                    results.Cells(webexRow, "H").Value = "No"
-                    results.Cells(webexRow, "I").Value = details(2)
-                    results.Cells(webexRow, "J").Value = "VAV = No"
+                If Not dfasCodes.Exists(code) Then
 
-                    webexRow = webexRow + 1
-                    noWE = noWE + 1
+                    issue = "IJ Missing from DFAS"
+
+                Else
+
+                    detailCourts = CStr(dfasCodes(code))
+
+                    If Not HLOCInList(hloc, detailCourts) Then
+                        issue = "Missing HLOC"
+                    End If
 
                 End If
 
-            Else
+                ' Missing HLOC and unmatched IJ findings
+                If issue <> "" Then
 
-                results.Cells(webexRow, "F").Value = code
-                results.Cells(webexRow, "G").Value = judgeName
-                results.Cells(webexRow, "H").Value = "No"
-                results.Cells(webexRow, "I").Value = "Not Found"
-                results.Cells(webexRow, "J").Value = _
-                    "Missing from DFAS"
+                    results.Cells(webexRow, "G").Value = code
+                    results.Cells(webexRow, "H").Value = judgeName
+                    results.Cells(webexRow, "I").Value = hloc
+                    results.Cells(webexRow, "J").Value = detailCourts
+                    results.Cells(webexRow, "K").Value = issue
 
-                webexRow = webexRow + 1
-                missingWE = missingWE + 1
+                    webexRow = webexRow + 1
+
+                End If
+
+                ' Independent Home Court = HLOC finding
+                If homeCourt <> "" And homeCourt = hloc Then
+
+                    results.Cells(sameRow, "M").Value = code
+                    results.Cells(sameRow, "N").Value = judgeName
+                    results.Cells(sameRow, "O").Value = homeCourt
+                    results.Cells(sameRow, "P").Value = hloc
+                    results.Cells(sameRow, "Q").Value = detailCourts
+
+                    sameRow = sameRow + 1
+
+                End If
 
             End If
 
@@ -194,9 +222,10 @@ Function CheckDFASVAV() As Boolean
 
     Next r
 
-    tool.Range("B27").Value = "Complete"
+    ' Successful processing
+    tool.Range("B28").Value = "Complete"
 
-    CheckDFASVAV = True
+    CheckDFASHLOC = True
     Exit Function
 
 CheckFailed:
@@ -204,13 +233,13 @@ CheckFailed:
     failureMessage = Err.Description
 
     If Not tool Is Nothing Then
-        tool.Range("B27").Value = "Failed"
+        tool.Range("B28").Value = "Failed"
         tool.Range("B11").Value = "Not Ready"
     End If
 
-    MsgBox "DFAS VAV verification failed: " & _
+    MsgBox "DFAS HLOC verification failed: " & _
         failureMessage, vbCritical
 
-    CheckDFASVAV = False
+    CheckDFASHLOC = False
 
 End Function
