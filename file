@@ -50,4 +50,99 @@ Sub SaveWebExHistory()
             "No WebEx data available to archive."
     End If
 
-    ' Back up the complete existing
+    ' Back up the complete existing WebEx history
+    backup.Cells.Clear
+
+    hist.UsedRange.Copy Destination:=backup.Range("A1")
+
+    backupComplete = True
+
+    ' Remove existing records for this reporting date
+    For existingRow = hist.Cells(hist.Rows.Count, "A") _
+        .End(xlUp).Row To 2 Step -1
+
+        If IsDate(hist.Cells(existingRow, "A").Value) Then
+
+            If DateValue(hist.Cells(existingRow, "A").Value) = _
+                reportDate Then
+
+                historyModified = True
+                hist.Rows(existingRow).Delete
+
+            End If
+
+        End If
+
+    Next existingRow
+
+    ' Archive the current WebEx report
+    For r = 2 To lastRow
+
+        If Trim(CStr(src.Cells(r, "D").Value)) <> "" Then
+
+            nextRow = hist.Cells(hist.Rows.Count, "A") _
+                .End(xlUp).Row + 1
+
+            historyModified = True
+
+            hist.Cells(nextRow, "A").Value = reportDate
+            hist.Cells(nextRow, "B").Value = src.Cells(r, "D").Value
+            hist.Cells(nextRow, "C").Value = src.Cells(r, "J").Value
+            hist.Cells(nextRow, "D").Value = src.Cells(r, "B").Value
+            hist.Cells(nextRow, "E").Value = src.Cells(r, "C").Value
+            hist.Cells(nextRow, "F").Value = src.Cells(r, "H").Value
+            hist.Cells(nextRow, "G").Value = src.Cells(r, "I").Value
+
+        End If
+
+    Next r
+
+    hist.Columns("A").NumberFormat = "mm/dd/yyyy"
+
+    MsgBox "WebEx history saved successfully.", vbInformation
+
+    Exit Sub
+
+SaveFailed:
+
+    errorMessage = Err.Description
+
+    ' Only restore if history was modified and
+    ' a complete backup is available
+    If historyModified And backupComplete Then
+
+        On Error Resume Next
+
+        Err.Clear
+        hist.Cells.Clear
+
+        backup.UsedRange.Copy Destination:=hist.Range("A1")
+
+        restoreSuccessful = (Err.Number = 0)
+
+        On Error GoTo 0
+
+        If restoreSuccessful Then
+
+            MsgBox "WebEx history save failed: " & _
+                errorMessage & vbCrLf & _
+                "Previous history restored.", vbCritical
+
+        Else
+
+            MsgBox "WebEx history save failed: " & _
+                errorMessage & vbCrLf & _
+                "Automatic recovery failed. Check " & _
+                "History_Backup before continuing.", vbCritical
+
+        End If
+
+    Else
+
+        MsgBox "WebEx history save failed: " & _
+            errorMessage & vbCrLf & _
+            "Existing history was not modified.", vbExclamation
+
+    End If
+
+End Sub
