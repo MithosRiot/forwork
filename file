@@ -1,4 +1,4 @@
-Sub CompareEnhancedDetained()
+Sub CompareWebEx()
 
     Dim ws As Worksheet
     Dim hist As Worksheet
@@ -13,6 +13,7 @@ Sub CompareEnhancedDetained()
     Dim lastRow As Long
     Dim r As Long
     Dim code As String
+    Dim judgeName As String
     Dim key As Variant
     Dim onRow As Long
     Dim offRow As Long
@@ -20,13 +21,13 @@ Sub CompareEnhancedDetained()
     On Error GoTo CompareFailed
 
     Set ws = ThisWorkbook.Worksheets( _
-        "Enhanced Detained - Excel Data")
+        "Detained Ops IJ WebEx Data")
 
     Set hist = ThisWorkbook.Worksheets( _
-        "History_enhancedDetained")
+        "History_webEx")
 
     Set results = ThisWorkbook.Worksheets( _
-        "Results_EnhancedDetained")
+        "Results_WebEx")
 
     Set tool = ThisWorkbook.Worksheets("Tool")
 
@@ -36,7 +37,7 @@ Sub CompareEnhancedDetained()
     currentCodes.CompareMode = vbTextCompare
     previousCodes.CompareMode = vbTextCompare
 
-    ' Validate the selected reporting date
+    ' Validate reporting date
     If Not IsDate(tool.Range("B3").Value) Then
         MsgBox "Select a valid reporting date.", vbExclamation
         Exit Sub
@@ -44,39 +45,45 @@ Sub CompareEnhancedDetained()
 
     currentDate = DateValue(tool.Range("B3").Value)
 
-    ' Ensure the current imported report is selected
-    If tool.Range("B6").Value <> "Imported" Then
-        MsgBox "Import the current Enhanced Detained report.", _
+    If tool.Range("B7").Value <> "Imported" Then
+        MsgBox "Import the current WebEx report.", _
             vbExclamation
         Exit Sub
     End If
 
-    ' Find the most recent previous report
+    ' Find most recent earlier WebEx report
     previousDate = GetPreviousReportDate( _
-        "History_enhancedDetained", currentDate)
+        "History_webEx", currentDate)
 
     If IsEmpty(previousDate) Then
-        MsgBox "No previous Enhanced Detained report found.", _
+        MsgBox "No previous WebEx report found.", _
             vbExclamation
         Exit Sub
     End If
 
-    ' Read unique IJ Codes from the current report
-    lastRow = ws.Cells(ws.Rows.Count, "E").End(xlUp).Row
+    ' Current WebEx: IJ Code D, Last Name B, First C
+    lastRow = ws.Cells(ws.Rows.Count, "D").End(xlUp).Row
 
     For r = 2 To lastRow
 
-        code = UCase(Trim(CStr(ws.Cells(r, "E").Value)))
+        code = UCase(Trim(CStr(ws.Cells(r, "D").Value)))
 
         If code <> "" Then
+
+            judgeName = Trim(CStr(ws.Cells(r, "B").Value)) _
+                & ", " & Trim(CStr(ws.Cells(r, "C").Value))
+
             If Not currentCodes.Exists(code) Then
-                currentCodes.Add code, ws.Cells(r, "F").Value
+                currentCodes.Add code, judgeName
             End If
+
         End If
 
     Next r
 
-    ' Read unique IJ Codes from previous history
+    ' Previous WebEx snapshot:
+    ' A = Report Date, B = IJ Code
+    ' D = Last Name, E = First Name
     lastRow = hist.Cells(hist.Rows.Count, "A").End(xlUp).Row
 
     For r = 2 To lastRow
@@ -89,10 +96,15 @@ Sub CompareEnhancedDetained()
                 code = UCase(Trim(CStr(hist.Cells(r, "B").Value)))
 
                 If code <> "" Then
+
+                    judgeName = Trim(CStr( _
+                        hist.Cells(r, "D").Value)) & ", " & _
+                        Trim(CStr(hist.Cells(r, "E").Value))
+
                     If Not previousCodes.Exists(code) Then
-                        previousCodes.Add code, _
-                            hist.Cells(r, "D").Value
+                        previousCodes.Add code, judgeName
                     End If
+
                 End If
 
             End If
@@ -102,27 +114,25 @@ Sub CompareEnhancedDetained()
     Next r
 
     If currentCodes.Count = 0 Or previousCodes.Count = 0 Then
-        MsgBox "One of the reports contains no IJ Codes.", _
+        MsgBox "One of the WebEx reports has no IJ Codes.", _
             vbExclamation
         Exit Sub
     End If
 
-    ' Clear previous results, preserving headings
+    ' Clear results, preserving headers
     results.Range("A5:B10000").ClearContents
     results.Range("D5:E10000").ClearContents
 
     onRow = 5
     offRow = 5
 
-    ' ROLL-ONS:
-    ' IJ Codes present now but absent previously
+    ' Roll-Ons: current but absent from previous
     For Each key In currentCodes.Keys
 
         If Not previousCodes.Exists(key) Then
 
             results.Cells(onRow, "A").Value = key
-            results.Cells(onRow, "B").Value = _
-                currentCodes(key)
+            results.Cells(onRow, "B").Value = currentCodes(key)
 
             onRow = onRow + 1
 
@@ -130,15 +140,13 @@ Sub CompareEnhancedDetained()
 
     Next key
 
-    ' ROLL-OFFS:
-    ' IJ Codes previously present but absent now
+    ' Roll-Offs: previous but absent from current
     For Each key In previousCodes.Keys
 
         If Not currentCodes.Exists(key) Then
 
             results.Cells(offRow, "D").Value = key
-            results.Cells(offRow, "E").Value = _
-                previousCodes(key)
+            results.Cells(offRow, "E").Value = previousCodes(key)
 
             offRow = offRow + 1
 
@@ -146,7 +154,7 @@ Sub CompareEnhancedDetained()
 
     Next key
 
-    ' Record comparison dates
+    ' Show comparison dates
     results.Range("A2").Value = "Current Report:"
     results.Range("B2").Value = currentDate
     results.Range("B2").NumberFormat = "mmm d, yyyy"
@@ -155,17 +163,16 @@ Sub CompareEnhancedDetained()
     results.Range("E2").Value = CDate(previousDate)
     results.Range("E2").NumberFormat = "mmm d, yyyy"
 
-    MsgBox "Enhanced Detained comparison complete." & _
+    MsgBox "WebEx comparison complete." & _
         vbCrLf & vbCrLf & _
         "Roll-Ons: " & (onRow - 5) & vbCrLf & _
-        "Roll-Offs: " & (offRow - 5), _
-        vbInformation
+        "Roll-Offs: " & (offRow - 5), vbInformation
 
     Exit Sub
 
 CompareFailed:
 
-    MsgBox "Enhanced Detained comparison failed: " & _
+    MsgBox "WebEx comparison failed: " & _
         Err.Description, vbCritical
 
 End Sub
