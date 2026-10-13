@@ -8,9 +8,6 @@ Sub CheckDFASHLOC()
 
     Dim dfasCodes As Object
     Dim seen As Object
-    Dim details As Variant
-    Dim parts As Variant
-    Dim part As Variant
 
     Dim lastRow As Long
     Dim r As Long
@@ -20,13 +17,11 @@ Sub CheckDFASHLOC()
     Dim detailCourts As String
     Dim judgeName As String
     Dim issue As String
-    Dim foundHLOC As Boolean
     Dim key As String
 
     Dim edRow As Long
     Dim webexRow As Long
-    Dim edCount As Long
-    Dim webexCount As Long
+    Dim sameRow As Long
 
     On Error GoTo CheckFailed
 
@@ -39,7 +34,6 @@ Sub CheckDFASHLOC()
         "Detained Ops IJ WebEx Data")
     Set results = ThisWorkbook.Worksheets("Results_HLOC")
 
-    ' Require current imports
     UpdateStatuses
 
     For r = 6 To 8
@@ -50,8 +44,6 @@ Sub CheckDFASHLOC()
         End If
     Next r
 
-    ' Build DFAS lookup:
-    ' A = judge_code, F = detail_court
     Set dfasCodes = CreateObject("Scripting.Dictionary")
     dfasCodes.CompareMode = vbTextCompare
 
@@ -60,8 +52,11 @@ Sub CheckDFASHLOC()
     For r = 2 To lastRow
         code = UCase(Trim(CStr(dfas.Cells(r, "A").Value)))
 
-        If code <> "" And Not dfasCodes.Exists(code) Then
-            dfasCodes.Add code, CStr(dfas.Cells(r, "F").Value)
+        If code <> "" Then
+            If Not dfasCodes.Exists(code) Then
+                dfasCodes.Add code, _
+                    CStr(dfas.Cells(r, "F").Value)
+            End If
         End If
     Next r
 
@@ -70,14 +65,17 @@ Sub CheckDFASHLOC()
         Exit Sub
     End If
 
-    ' Clear old results but preserve headings
+    ' Clear results, preserving headings
     results.Range("A5:E10000").ClearContents
     results.Range("G5:K10000").ClearContents
+    results.Range("M5:Q10000").ClearContents
 
     edRow = 5
     webexRow = 5
+    sameRow = 5
 
     ' -------- ENHANCED DETAINED --------
+
     Set seen = CreateObject("Scripting.Dictionary")
     seen.CompareMode = vbTextCompare
 
@@ -87,7 +85,6 @@ Sub CheckDFASHLOC()
 
         code = UCase(Trim(CStr(ed.Cells(r, "E").Value)))
         hloc = UCase(Trim(CStr(ed.Cells(r, "C").Value)))
-        baseCourt = UCase(Trim(CStr(ed.Cells(r, "A").Value)))
         judgeName = Trim(CStr(ed.Cells(r, "F").Value))
 
         If code <> "" And hloc <> "" Then
@@ -95,37 +92,43 @@ Sub CheckDFASHLOC()
             key = code & "|" & hloc
 
             If Not seen.Exists(key) Then
-                seen.Add key, True
 
+                seen.Add key, True
                 detailCourts = ""
                 issue = ""
 
                 If Not dfasCodes.Exists(code) Then
                     issue = "IJ Missing from DFAS"
                 Else
+
                     detailCourts = CStr(dfasCodes(code))
 
                     If Not HLOCInList(hloc, detailCourts) Then
                         issue = "Missing HLOC"
                     End If
+
                 End If
 
                 If issue <> "" Then
+
                     results.Cells(edRow, "A").Value = code
                     results.Cells(edRow, "B").Value = judgeName
                     results.Cells(edRow, "C").Value = hloc
                     results.Cells(edRow, "D").Value = detailCourts
                     results.Cells(edRow, "E").Value = issue
+
                     edRow = edRow + 1
-                    edCount = edCount + 1
+
                 End If
 
             End If
+
         End If
 
     Next r
 
     ' -------- WEBEX --------
+
     Set seen = CreateObject("Scripting.Dictionary")
     seen.CompareMode = vbTextCompare
 
@@ -145,69 +148,69 @@ Sub CheckDFASHLOC()
             key = code & "|" & hloc
 
             If Not seen.Exists(key) Then
-                seen.Add key, True
 
+                seen.Add key, True
                 detailCourts = ""
                 issue = ""
 
                 If Not dfasCodes.Exists(code) Then
                     issue = "IJ Missing from DFAS"
                 Else
+
                     detailCourts = CStr(dfasCodes(code))
 
                     If Not HLOCInList(hloc, detailCourts) Then
                         issue = "Missing HLOC"
                     End If
+
                 End If
 
-                ' Flag Home Court = HLOC separately
-                If baseCourt = hloc And issue = "" Then
-                    issue = "Home Court = HLOC"
-                End If
-
+                ' Missing HLOC and missing IJ findings
                 If issue <> "" Then
+
                     results.Cells(webexRow, "G").Value = code
                     results.Cells(webexRow, "H").Value = judgeName
                     results.Cells(webexRow, "I").Value = hloc
                     results.Cells(webexRow, "J").Value = detailCourts
                     results.Cells(webexRow, "K").Value = issue
+
                     webexRow = webexRow + 1
-                    webexCount = webexCount + 1
+
+                End If
+
+                ' Independent Home Court = HLOC check
+                If baseCourt <> "" And baseCourt = hloc Then
+
+                    results.Cells(sameRow, "M").Value = code
+                    results.Cells(sameRow, "N").Value = judgeName
+                    results.Cells(sameRow, "O").Value = baseCourt
+                    results.Cells(sameRow, "P").Value = hloc
+                    results.Cells(sameRow, "Q").Value = detailCourts
+
+                    sameRow = sameRow + 1
+
                 End If
 
             End If
+
         End If
 
     Next r
 
-    MsgBox "HLOC verification complete." & vbCrLf & _
-        "Enhanced Detained issues: " & edCount & vbCrLf & _
-        "WebEx issues: " & webexCount, vbInformation
+    MsgBox "HLOC verification complete." & _
+        vbCrLf & vbCrLf & _
+        "Enhanced Detained issues: " & (edRow - 5) & _
+        vbCrLf & _
+        "WebEx HLOC issues: " & (webexRow - 5) & _
+        vbCrLf & _
+        "WebEx Home Court = HLOC: " & (sameRow - 5), _
+        vbInformation
 
     Exit Sub
 
 CheckFailed:
+
     MsgBox "HLOC verification failed: " & _
         Err.Description, vbCritical
 
 End Sub
-
-Function HLOCInList( _
-    ByVal hloc As String, _
-    ByVal detailCourts As String) As Boolean
-
-    Dim parts As Variant
-    Dim part As Variant
-
-    parts = Split(detailCourts, ",")
-
-    For Each part In parts
-        If UCase(Trim(CStr(part))) = UCase(Trim(hloc)) Then
-            HLOCInList = True
-            Exit Function
-        End If
-    Next part
-
-    HLOCInList = False
-
-End Function
