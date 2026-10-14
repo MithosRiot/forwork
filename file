@@ -1,94 +1,30 @@
-Sub ProcessAllReports()
+Private Sub Worksheet_Change(ByVal Target As Range)
 
-    Dim tool As Worksheet
-    Dim r As Long
-    Dim missing As String
-    Dim previousED As Variant
-    Dim previousWE As Variant
+    If Intersect(Target, Me.Range("B3")) Is Nothing Then
+        Exit Sub
+    End If
 
-    On Error GoTo ProcessFailed
+    On Error GoTo ChangeFailed
 
-    Set tool = ThisWorkbook.Worksheets("Tool")
+    Application.EnableEvents = False
 
+    ' Refresh imported report statuses
     UpdateStatuses
+
+    ' Refresh previous report dates
     UpdatePreviousReportDates
 
-    ' Reset processing indicators
-    tool.Range("B25:B28").Value = "Not Run"
-    tool.Range("B11").Value = "Out of Date"
+    ' Invalidate previous processing results
+    ResetProcessingStatus
 
-    ' Verify all current reports are imported
-    For r = 6 To 8
-
-        If tool.Cells(r, "B").Value <> "Imported" Then
-            missing = missing & vbCrLf & _
-                "- " & tool.Cells(r, "A").Value
-        End If
-
-    Next r
-
-    If missing <> "" Then
-        Err.Raise vbObjectError + 1001, , _
-            "Missing or outdated reports:" & missing
-    End If
-
-    ' Verify previous reports are available
-    previousED = GetPreviousReportDate( _
-        "History_enhancedDetained", _
-        DateValue(tool.Range("B3").Value))
-
-    previousWE = GetPreviousReportDate( _
-        "History_webEx", _
-        DateValue(tool.Range("B3").Value))
-
-    If IsEmpty(previousED) Or IsEmpty(previousWE) Then
-        Err.Raise vbObjectError + 1002, , _
-            "Previous report data is missing."
-    End If
-
-    ' Execute all verification checks
-    If Not CompareEnhancedDetained() Then GoTo ProcessFailed
-
-    If Not CompareWebEx() Then GoTo ProcessFailed
-
-    If Not CheckDFASVAV() Then GoTo ProcessFailed
-
-    If Not CheckDFASHLOC() Then GoTo ProcessFailed
-
-    ' Generate the completed Dashboard
-    If Not GenerateDashboardReport() Then GoTo ProcessFailed
-
-    ' All processing completed successfully
-    Application.CalculateFull
-
-    tool.Range("B13").Value = Now
-    tool.Range("B13").NumberFormat = _
-        "m/d/yyyy h:mm AM/PM"
-
-    tool.Range("B11").Value = "Up to Date"
-
-    MsgBox "IJ Judge Verification completed successfully." & _
-        vbCrLf & vbCrLf & _
-        "All four verification checks passed." & _
-        vbCrLf & _
-        "Dashboard generated successfully.", _
-        vbInformation
-
-    ThisWorkbook.Worksheets("Dashboard").Activate
-
+CleanExit:
+    Application.EnableEvents = True
     Exit Sub
 
-ProcessFailed:
+ChangeFailed:
+    MsgBox "Reporting week update failed: " & _
+        Err.Description, vbExclamation
 
-    tool.Range("B11").Value = "Not Ready"
-
-    If Err.Number <> 0 Then
-        MsgBox "Report processing stopped:" & vbCrLf & _
-            Err.Description, vbExclamation
-    Else
-        MsgBox "Report processing stopped." & vbCrLf & _
-            "Review the processing indicators on the Tool tab.", _
-            vbExclamation
-    End If
+    Resume CleanExit
 
 End Sub
