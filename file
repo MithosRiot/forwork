@@ -1,72 +1,161 @@
-Sub ProcessAllReports()
+Sub GenerateDashboardReport()
 
-    Dim tool As Worksheet
+    Dim dash As Worksheet
+    Dim src As Worksheet
+    Dim nextRow As Long
+    Dim lastRow As Long
     Dim r As Long
-    Dim missing As String
+    Dim c As Long
+    Dim sourceCol As Long
+    Dim fieldCount As Long
+    Dim sectionCount As Long
+    Dim sectionTitle As String
+    Dim sectionHeaders As Variant
+    Dim sectionSheet As String
+    Dim sections As Variant
+    Dim item As Variant
+    Dim sectionStart As Long
 
-    On Error GoTo ProcessFailed
+    On Error GoTo ReportFailed
 
-    Set tool = ThisWorkbook.Worksheets("Tool")
+    Set dash = ThisWorkbook.Worksheets("Dashboard")
 
-    UpdateStatuses
+    ' Do not modify the existing Dashboard header or summary.
+    dash.Range("A18:F" & dash.Rows.Count).Clear
 
-    ' Reset processing statuses
-    tool.Range("B25:B28").Value = "Not Run"
-    tool.Range("B11").Value = "Out of Date"
+    nextRow = 18
 
-    ' Check all required imports
-    For r = 6 To 8
+    ' Each entry:
+    ' Worksheet, title, first source column,
+    ' number of fields, column headings
+    sections = Array( _
+        Array("Results_EnhancedDetained", _
+            "ENHANCED DETAINED - ROLL-ONS", 1, 2, _
+            Array("IJ Code", "Judge Name")), _
+        Array("Results_EnhancedDetained", _
+            "ENHANCED DETAINED - ROLL-OFFS", 4, 2, _
+            Array("IJ Code", "Judge Name")), _
+        Array("Results_DFAS", _
+            "ENHANCED DETAINED - VAV COURT ISSUES", 1, 5, _
+            Array("IJ Code", "Judge Name", "VAV Court", _
+                  "DFAS Court", "Verification Status")), _
+        Array("Results_HLOC", _
+            "ENHANCED DETAINED - HLOC UPDATES", 1, 5, _
+            Array("IJ Code", "Judge Name", "HLOC", _
+                  "DFAS Detail Court", "Issue")), _
+        Array("Results_WebEx", _
+            "WEBEX - ROLL-ONS", 1, 2, _
+            Array("IJ Code", "Judge Name")), _
+        Array("Results_WebEx", _
+            "WEBEX - ROLL-OFFS", 4, 2, _
+            Array("IJ Code", "Judge Name")), _
+        Array("Results_DFAS", _
+            "WEBEX - VAV COURT ISSUES", 6, 5, _
+            Array("IJ Code", "Judge Name", "VAV Court", _
+                  "DFAS Court", "Verification Status")), _
+        Array("Results_HLOC", _
+            "WEBEX - HLOC UPDATES", 7, 5, _
+            Array("IJ Code", "Judge Name", "HLOC", _
+                  "DFAS Detail Court", "Issue")), _
+        Array("Results_HLOC", _
+            "WEBEX - HOME COURT = HLOC", 13, 5, _
+            Array("IJ Code", "Judge Name", "Home Court", _
+                  "HLOC", "DFAS Detail Court")) _
+    )
 
-        If tool.Cells(r, "B").Value <> "Imported" Then
-            missing = missing & vbCrLf & _
-                "- " & tool.Cells(r, "A").Value
+    For Each item In sections
+
+        sectionSheet = CStr(item(0))
+        sectionTitle = CStr(item(1))
+        sourceCol = CLng(item(2))
+        fieldCount = CLng(item(3))
+        sectionHeaders = item(4)
+
+        Set src = ThisWorkbook.Worksheets(sectionSheet)
+
+        ' Section title
+        sectionStart = nextRow
+
+        dash.Cells(nextRow, 1).Value = sectionTitle
+
+        With dash.Range(dash.Cells(nextRow, 1), _
+                        dash.Cells(nextRow, fieldCount))
+
+            .Font.Bold = True
+            .Font.Color = vbWhite
+            .Interior.Color = RGB(45, 65, 85)
+
+        End With
+
+        nextRow = nextRow + 1
+
+        ' Column headings
+        For c = 0 To fieldCount - 1
+            dash.Cells(nextRow, c + 1).Value = _
+                sectionHeaders(c)
+        Next c
+
+        With dash.Range(dash.Cells(nextRow, 1), _
+                        dash.Cells(nextRow, fieldCount))
+
+            .Font.Bold = True
+            .Interior.Color = RGB(220, 230, 240)
+        End With
+
+        nextRow = nextRow + 1
+
+        ' Data always begins at row 5 of Results sheets.
+        lastRow = src.Cells(src.Rows.Count, _
+                           sourceCol).End(xlUp).Row
+
+        sectionCount = 0
+
+        For r = 5 To lastRow
+
+            If Trim(CStr(src.Cells(r, sourceCol).Value)) <> "" Then
+
+                For c = 0 To fieldCount - 1
+
+                    dash.Cells(nextRow, c + 1).Value = _
+                        src.Cells(r, sourceCol + c).Value
+
+                Next c
+
+                nextRow = nextRow + 1
+                sectionCount = sectionCount + 1
+
+            End If
+
+        Next r
+
+        If sectionCount = 0 Then
+
+            dash.Cells(nextRow, 1).Value = "None"
+            dash.Cells(nextRow, 1).Font.Italic = True
+
+            nextRow = nextRow + 1
+
         End If
 
-    Next r
+        ' One blank row between sections.
+        nextRow = nextRow + 1
 
-    If missing <> "" Then
+    Next item
 
-        tool.Range("B11").Value = "Not Ready"
+    ' Format the generated report.
+    dash.Range("A18:F" & nextRow).VerticalAlignment = _
+        xlVAlignCenter
 
-        MsgBox "Cannot process reports. Check:" & _
-            vbCrLf & missing, vbExclamation
+    dash.Range("A18:F" & nextRow).WrapText = False
 
-        Exit Sub
-
-    End If
-
-    ' Run checks in sequence.
-    ' Stop immediately if any check fails.
-
-    If Not CompareEnhancedDetained() Then GoTo ProcessFailed
-
-    If Not CompareWebEx() Then GoTo ProcessFailed
-
-    If Not CheckDFASVAV() Then GoTo ProcessFailed
-
-    If Not CheckDFASHLOC() Then GoTo ProcessFailed
-
-    ' All four checks completed successfully.
-    ' Dashboard generation will be added next.
-    tool.Range("B11").Value = "Out of Date"
-
-    MsgBox "All four verification checks completed." & _
-        vbCrLf & vbCrLf & _
-        "Enhanced Detained: Complete" & vbCrLf & _
-        "WebEx: Complete" & vbCrLf & _
-        "DFAS VAV: Complete" & vbCrLf & _
-        "DFAS HLOC: Complete" & vbCrLf & vbCrLf & _
-        "Dashboard generation is not connected yet.", _
-        vbInformation
+    MsgBox "Dashboard detailed report generated." & _
+        vbCrLf & "Sections: 9", vbInformation
 
     Exit Sub
 
-ProcessFailed:
+ReportFailed:
 
-    tool.Range("B11").Value = "Not Ready"
-
-    MsgBox "Processing stopped." & vbCrLf & _
-        "Check the processing status indicators " & _
-        "on the Tool tab.", vbExclamation
+    MsgBox "Dashboard generation failed: " & _
+        Err.Description, vbCritical
 
 End Sub
