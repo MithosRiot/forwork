@@ -1,30 +1,359 @@
-Private Sub Worksheet_Change(ByVal Target As Range)
+Function CheckDFASHLOC() As Boolean
 
-    If Intersect(Target, Me.Range("B3")) Is Nothing Then
-        Exit Sub
-    End If
+    Dim tool As Worksheet
+    Dim dfas As Worksheet
+    Dim ed As Worksheet
+    Dim webex As Worksheet
+    Dim results As Worksheet
 
-    On Error GoTo ChangeFailed
+    Dim currentPairs As Object
+    Dim dfasPairs As Object
+    Dim currentJudges As Object
+    Dim dfasJudges As Object
+    Dim judgeNames As Object
+    Dim dfasDetails As Object
+    Dim seenHome As Object
 
-    Application.EnableEvents = False
+    Dim lastRow As Long
+    Dim r As Long
+    Dim code As String
+    Dim hloc As String
+    Dim homeCourt As String
+    Dim judgeName As String
+    Dim detailText As String
+    Dim key As String
+    Dim item As Variant
+    Dim parts As Variant
+    Dim part As Variant
 
-    ' Refresh imported report statuses
+    Dim onRow As Long
+    Dim offRow As Long
+    Dim homeRow As Long
+    Dim manualCount As Long
+    Dim failureMessage As String
+
+    CheckDFASHLOC = False
+    On Error GoTo CheckFailed
+
+    Set tool = ThisWorkbook.Worksheets("Tool")
+    Set dfas = ThisWorkbook.Worksheets( _
+        "DFAS EIOR Judge List Data")
+    Set ed = ThisWorkbook.Worksheets( _
+        "Enhanced Detained - Excel Data")
+    Set webex = ThisWorkbook.Worksheets( _
+        "Detained Ops IJ WebEx Data")
+    Set results = ThisWorkbook.Worksheets("Results_HLOC")
+
+    tool.Range("B28").Value = "Running"
+    tool.Range("B11").Value = "Out of Date"
+    DoEvents
+
     UpdateStatuses
 
-    ' Refresh previous report dates
-    UpdatePreviousReportDates
+    For r = 6 To 8
+        If tool.Cells(r, "B").Value <> "Imported" Then
+            Err.Raise vbObjectError + 901, , _
+                "All current reports must be imported."
+        End If
+    Next r
 
-    ' Invalidate previous processing results
-    ResetProcessingStatus
+    Set currentPairs = CreateObject("Scripting.Dictionary")
+    Set dfasPairs = CreateObject("Scripting.Dictionary")
+    Set currentJudges = CreateObject("Scripting.Dictionary")
+    Set dfasJudges = CreateObject("Scripting.Dictionary")
+    Set judgeNames = CreateObject("Scripting.Dictionary")
+    Set dfasDetails = CreateObject("Scripting.Dictionary")
+    Set seenHome = CreateObject("Scripting.Dictionary")
 
-CleanExit:
-    Application.EnableEvents = True
-    Exit Sub
+    currentPairs.CompareMode = vbTextCompare
+    dfasPairs.CompareMode = vbTextCompare
+    currentJudges.CompareMode = vbTextCompare
+    dfasJudges.CompareMode = vbTextCompare
+    judgeNames.CompareMode = vbTextCompare
+    dfasDetails.CompareMode = vbTextCompare
+    seenHome.CompareMode = vbTextCompare
 
-ChangeFailed:
-    MsgBox "Reporting week update failed: " & _
-        Err.Description, vbExclamation
+    ' ==================================
+    ' BUILD COMBINED CURRENT HLOC LIST
+    ' ==================================
 
-    Resume CleanExit
+    ' Enhanced Detained
+    lastRow = ed.Cells(ed.Rows.Count, "E").End(xlUp).Row
 
-End Sub
+    For r = 2 To lastRow
+
+        code = UCase(Trim(CStr(ed.Cells(r, "E").Value)))
+        hloc = UCase(Trim(CStr(ed.Cells(r, "C").Value)))
+        judgeName = Trim(CStr(ed.Cells(r, "F").Value))
+
+        If code <> "" Then
+
+            If Not currentJudges.Exists(code) Then
+                currentJudges.Add code, True
+            End If
+
+            If Not judgeNames.Exists(code) Then
+                judgeNames.Add code, judgeName
+            End If
+
+            If hloc <> "" Then
+                key = code & "|" & hloc
+
+                If Not currentPairs.Exists(key) Then
+                    currentPairs.Add key, True
+                End If
+            End If
+
+        End If
+
+    Next r
+
+    ' Detained Ops IJ WebEx
+    lastRow = webex.Cells(webex.Rows.Count, "D").End(xlUp).Row
+
+    For r = 2 To lastRow
+
+        code = UCase(Trim(CStr(webex.Cells(r, "D").Value)))
+        hloc = UCase(Trim(CStr(webex.Cells(r, "J").Value)))
+
+        judgeName = Trim(CStr(webex.Cells(r, "B").Value)) _
+            & ", " & Trim(CStr(webex.Cells(r, "C").Value))
+
+        If code <> "" Then
+
+            If Not currentJudges.Exists(code) Then
+                currentJudges.Add code, True
+            End If
+
+            If Not judgeNames.Exists(code) Then
+                judgeNames.Add code, judgeName
+            End If
+
+            If hloc <> "" Then
+                key = code & "|" & hloc
+
+                If Not currentPairs.Exists(key) Then
+                    currentPairs.Add key, True
+                End If
+            End If
+
+        End If
+
+    Next r
+
+    If currentJudges.Count = 0 Then
+        Err.Raise vbObjectError + 902, , _
+            "No current IJ Codes found."
+    End If
+
+    ' ==================================
+    ' BUILD DFAS HLOC LIST
+    ' ==================================
+
+    lastRow = dfas.Cells(dfas.Rows.Count, "A").End(xlUp).Row
+
+    For r = 2 To lastRow
+
+        code = UCase(Trim(CStr(dfas.Cells(r, "A").Value)))
+
+        If code <> "" Then
+
+            If Not dfasJudges.Exists(code) Then
+                dfasJudges.Add code, True
+            End If
+
+            detailText = Trim(CStr(dfas.Cells(r, "F").Value))
+
+            If Not dfasDetails.Exists(code) Then
+                dfasDetails.Add code, detailText
+            ElseIf detailText <> "" Then
+                dfasDetails(code) = _
+                    dfasDetails(code) & ", " & detailText
+            End If
+
+            parts = Split(detailText, ",")
+
+            For Each part In parts
+
+                hloc = UCase(Trim(CStr(part)))
+
+                If hloc <> "" Then
+
+                    key = code & "|" & hloc
+
+                    If Not dfasPairs.Exists(key) Then
+                        dfasPairs.Add key, True
+                    End If
+
+                End If
+
+            Next part
+
+        End If
+
+    Next r
+
+    If dfasJudges.Count = 0 Then
+        Err.Raise vbObjectError + 903, , _
+            "No DFAS IJ Codes found."
+    End If
+
+    ' ==================================
+    ' GENERATE HLOC ROLL-ONS
+    ' ==================================
+
+    results.Range("A5:E10000").ClearContents
+    results.Range("G5:K10000").ClearContents
+    results.Range("M5:Q10000").ClearContents
+
+    onRow = 5
+    offRow = 5
+    homeRow = 5
+
+    For Each item In currentPairs.Keys
+
+        If Not dfasPairs.Exists(item) Then
+
+            parts = Split(CStr(item), "|")
+            code = parts(0)
+            hloc = parts(1)
+
+            results.Cells(onRow, "A").Value = code
+            results.Cells(onRow, "B").Value = judgeNames(code)
+            results.Cells(onRow, "C").Value = hloc
+
+            If dfasJudges.Exists(code) Then
+
+                results.Cells(onRow, "D").Value = _
+                    dfasDetails(code)
+
+                results.Cells(onRow, "E").Value = "Roll On"
+
+                results.Range( _
+                    results.Cells(onRow, "A"), _
+                    results.Cells(onRow, "E")).Interior.Color = _
+                    RGB(198, 239, 206)
+
+            Else
+
+                results.Cells(onRow, "D").Value = "Not Found"
+                results.Cells(onRow, "E").Value = _
+                    "Manual Verification"
+
+                results.Range( _
+                    results.Cells(onRow, "A"), _
+                    results.Cells(onRow, "E")).Interior.Color = _
+                    RGB(255, 235, 156)
+
+                manualCount = manualCount + 1
+
+            End If
+
+            onRow = onRow + 1
+
+        End If
+
+    Next item
+
+    ' ==================================
+    ' GENERATE HLOC ROLL-OFFS
+    ' ==================================
+
+    For Each item In dfasPairs.Keys
+
+        If Not currentPairs.Exists(item) Then
+
+            parts = Split(CStr(item), "|")
+            code = parts(0)
+            hloc = parts(1)
+
+            ' Only evaluate active IJs on either report.
+            If currentJudges.Exists(code) Then
+
+                results.Cells(offRow, "G").Value = code
+                results.Cells(offRow, "H").Value = judgeNames(code)
+                results.Cells(offRow, "I").Value = hloc
+                results.Cells(offRow, "J").Value = _
+                    dfasDetails(code)
+                results.Cells(offRow, "K").Value = "Roll Off"
+
+                results.Range( _
+                    results.Cells(offRow, "G"), _
+                    results.Cells(offRow, "K")).Interior.Color = _
+                    RGB(255, 199, 206)
+
+                offRow = offRow + 1
+
+            End If
+
+        End If
+
+    Next item
+
+    ' ==================================
+    ' WEBEX HOME COURT = HLOC
+    ' ==================================
+
+    lastRow = webex.Cells(webex.Rows.Count, "D").End(xlUp).Row
+
+    For r = 2 To lastRow
+
+        code = UCase(Trim(CStr(webex.Cells(r, "D").Value)))
+        hloc = UCase(Trim(CStr(webex.Cells(r, "J").Value)))
+        homeCourt = UCase(Trim(CStr(webex.Cells(r, "H").Value)))
+
+        If code <> "" And hloc <> "" Then
+
+            key = code & "|" & hloc
+
+            If homeCourt = hloc Then
+
+                If Not seenHome.Exists(key) Then
+
+                    seenHome.Add key, True
+
+                    results.Cells(homeRow, "M").Value = code
+                    results.Cells(homeRow, "N").Value = judgeNames(code)
+                    results.Cells(homeRow, "O").Value = homeCourt
+                    results.Cells(homeRow, "P").Value = hloc
+
+                    If dfasDetails.Exists(code) Then
+                        results.Cells(homeRow, "Q").Value = _
+                            dfasDetails(code)
+                    End If
+
+                    homeRow = homeRow + 1
+
+                End If
+
+            End If
+
+        End If
+
+    Next r
+
+    tool.Range("B28").Value = "Complete"
+    CheckDFASHLOC = True
+
+    MsgBox "HLOC comparison complete." & vbCrLf & _
+        "Roll-Ons / Review: " & (onRow - 5) & vbCrLf & _
+        "Roll-Offs: " & (offRow - 5) & vbCrLf & _
+        "Manual Verification: " & manualCount & vbCrLf & _
+        "Home Court = HLOC: " & (homeRow - 5), _
+        vbInformation
+
+    Exit Function
+
+CheckFailed:
+
+    failureMessage = Err.Description
+
+    tool.Range("B28").Value = "Failed"
+    tool.Range("B11").Value = "Not Ready"
+
+    MsgBox "HLOC comparison failed: " & _
+        failureMessage, vbCritical
+
+    CheckDFASHLOC = False
+
+End Function
