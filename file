@@ -1,152 +1,91 @@
-Sub AddCombinedHLOCTable( _
-    dash As Worksheet, ByRef nextRow As Long)
+Function GenerateDashboardReport() As Boolean
 
-    Dim src As Worksheet
-    Dim judges As Object
-    Dim names As Object
-    Dim keys As Variant
-    Dim code As String
-    Dim hloc As String
-    Dim status As String
-    Dim entry As Variant
-    Dim r As Long
-    Dim i As Long
+    Dim dash As Worksheet
+    Dim nextRow As Long
     Dim lastRow As Long
-    Dim rowOut As Long
 
-    Set src = ThisWorkbook.Worksheets("Results_HLOC")
+    On Error GoTo ReportFailed
 
-    Set judges = CreateObject("Scripting.Dictionary")
-    Set names = CreateObject("Scripting.Dictionary")
+    GenerateDashboardReport = False
 
-    judges.CompareMode = vbTextCompare
-    names.CompareMode = vbTextCompare
+    Set dash = ThisWorkbook.Worksheets("Dashboard")
 
-    ' Read roll-ons and manual verification entries.
-    lastRow = src.Cells(src.Rows.Count, "A").End(xlUp).Row
+    ' Preserve the Dashboard header and summary.
+    ' Clear only the generated report area.
+    lastRow = dash.Cells(dash.Rows.Count, "A").End(xlUp).Row
 
-    For r = 5 To lastRow
-
-        code = Trim(CStr(src.Cells(r, "A").Value))
-        hloc = Trim(CStr(src.Cells(r, "C").Value))
-        status = Trim(CStr(src.Cells(r, "E").Value))
-
-        If code <> "" Then
-
-            If Not judges.Exists(code) Then
-                judges.Add code, Array("", "", "")
-                names.Add code, src.Cells(r, "B").Value
-            End If
-
-            entry = judges(code)
-
-            If status = "Roll On" Then
-                If entry(0) <> "" Then entry(0) = entry(0) & ", "
-                entry(0) = entry(0) & hloc
-
-            ElseIf status = "Manual Verification" Then
-                If entry(2) <> "" Then entry(2) = entry(2) & ", "
-                entry(2) = entry(2) & hloc
-            End If
-
-            judges(code) = entry
-
-        End If
-
-    Next r
-
-    ' Read roll-offs.
-    lastRow = src.Cells(src.Rows.Count, "G").End(xlUp).Row
-
-    For r = 5 To lastRow
-
-        code = Trim(CStr(src.Cells(r, "G").Value))
-        hloc = Trim(CStr(src.Cells(r, "I").Value))
-
-        If code <> "" Then
-
-            If Not judges.Exists(code) Then
-                judges.Add code, Array("", "", "")
-                names.Add code, src.Cells(r, "H").Value
-            End If
-
-            entry = judges(code)
-
-            If entry(1) <> "" Then entry(1) = entry(1) & ", "
-            entry(1) = entry(1) & hloc
-
-            judges(code) = entry
-
-        End If
-
-    Next r
-
-    ' Create table heading.
-    dash.Cells(nextRow, "A").Value = _
-        "COMBINED HLOC CHANGES - ENHANCED DETAINED + WEBEX"
-
-    With dash.Range(dash.Cells(nextRow, 1), _
-                    dash.Cells(nextRow, 5))
-        .Font.Bold = True
-        .Font.Color = vbWhite
-        .Interior.Color = RGB(45, 65, 85)
-    End With
-
-    nextRow = nextRow + 1
-
-    dash.Cells(nextRow, 1).Value = "IJ Code"
-    dash.Cells(nextRow, 2).Value = "Judge Name"
-    dash.Cells(nextRow, 3).Value = "HLOC Roll-On"
-    dash.Cells(nextRow, 4).Value = "HLOC Roll-Off"
-    dash.Cells(nextRow, 5).Value = "Manual Verification"
-
-    With dash.Range(dash.Cells(nextRow, 1), _
-                    dash.Cells(nextRow, 5))
-        .Font.Bold = True
-        .Interior.Color = RGB(220, 230, 240)
-    End With
-
-    nextRow = nextRow + 1
-
-    If judges.Count = 0 Then
-        dash.Cells(nextRow, 1).Value = "None"
-        nextRow = nextRow + 2
-        Exit Sub
+    If lastRow >= 20 Then
+        dash.Range("A20:F" & lastRow).Clear
     End If
 
-    keys = judges.Keys
+    nextRow = 20
 
-    For i = LBound(keys) To UBound(keys)
+    ' ==================================
+    ' ENHANCED DETAINED
+    ' ==================================
 
-        code = CStr(keys(i))
-        entry = judges(code)
-        rowOut = nextRow
+    AddReportSection dash, nextRow, _
+        "Results_EnhancedDetained", _
+        "ENHANCED DETAINED - IJ ROLL-ONS", 1, _
+        Array("IJ Code", "Judge Name")
 
-        dash.Cells(rowOut, 1).Value = code
-        dash.Cells(rowOut, 2).Value = names(code)
-        dash.Cells(rowOut, 3).Value = entry(0)
-        dash.Cells(rowOut, 4).Value = entry(1)
-        dash.Cells(rowOut, 5).Value = entry(2)
+    AddReportSection dash, nextRow, _
+        "Results_EnhancedDetained", _
+        "ENHANCED DETAINED - IJ ROLL-OFFS", 4, _
+        Array("IJ Code", "Judge Name")
 
-        If entry(0) <> "" Then
-            dash.Cells(rowOut, 3).Interior.Color = _
-                RGB(198, 239, 206)
-        End If
+    AddReportSection dash, nextRow, _
+        "Results_DFAS", _
+        "ENHANCED DETAINED - VAV COURT ISSUES", 1, _
+        Array("IJ Code", "Judge Name", "VAV Court", _
+              "DFAS Court", "Verification Status")
 
-        If entry(1) <> "" Then
-            dash.Cells(rowOut, 4).Interior.Color = _
-                RGB(255, 199, 206)
-        End If
+    ' ==================================
+    ' DETAINED OPS IJ WEBEX
+    ' ==================================
 
-        If entry(2) <> "" Then
-            dash.Cells(rowOut, 5).Interior.Color = _
-                RGB(255, 235, 156)
-        End If
+    AddReportSection dash, nextRow, _
+        "Results_WebEx", _
+        "WEBEX - IJ ROLL-ONS", 1, _
+        Array("IJ Code", "Judge Name")
 
-        nextRow = nextRow + 1
+    AddReportSection dash, nextRow, _
+        "Results_WebEx", _
+        "WEBEX - IJ ROLL-OFFS", 4, _
+        Array("IJ Code", "Judge Name")
 
-    Next i
+    AddReportSection dash, nextRow, _
+        "Results_DFAS", _
+        "WEBEX - VAV COURT ISSUES", 6, _
+        Array("IJ Code", "Judge Name", "VAV Court", _
+              "DFAS Court", "Verification Status")
 
-    nextRow = nextRow + 1
+    ' ==================================
+    ' COMBINED HLOC CHANGES
+    ' ==================================
 
-End Sub
+    ' One row per IJ, with actual HLOC codes
+    ' grouped into Roll-On and Roll-Off columns.
+    AddCombinedHLOCTable dash, nextRow
+
+    ' ==================================
+    ' WEBEX HOME COURT CHECK
+    ' ==================================
+
+    AddReportSection dash, nextRow, _
+        "Results_HLOC", _
+        "WEBEX - HOME COURT = HLOC", 13, _
+        Array("IJ Code", "Judge Name", "Home Court", _
+              "HLOC", "DFAS Detail Court")
+
+    GenerateDashboardReport = True
+    Exit Function
+
+ReportFailed:
+
+    MsgBox "Dashboard generation failed: " & _
+        Err.Description, vbCritical
+
+    GenerateDashboardReport = False
+
+End Function
