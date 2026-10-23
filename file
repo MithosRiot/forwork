@@ -1,100 +1,85 @@
 
-Function GenerateDashboardReport() As Boolean
+Sub UpdateStatuses()
 
-    Dim dash As Worksheet
-    Dim nextRow As Long
+    Dim ws As Worksheet
+    Dim hist As Worksheet
+    Dim r As Long
     Dim lastRow As Long
+    Dim i As Long
+    Dim reportDate As Date
+    Dim historyFound As Boolean
 
-    On Error GoTo ReportFailed
+    Set ws = ThisWorkbook.Worksheets("Tool")
 
-    GenerateDashboardReport = False
+    ' Rows 6-9 contain the four required reports.
+    For r = 6 To 9
 
-    Set dash = ThisWorkbook.Worksheets("Dashboard")
+        If ws.Cells(r, 3).Value = "" Then
 
-    ' Preserve Dashboard header and summary.
-    ' Clear only previously generated details.
-    lastRow = dash.Cells(dash.Rows.Count, "A").End(xlUp).Row
+            ws.Cells(r, 2).Value = "Missing"
 
-    If lastRow >= 20 Then
-        dash.Range("A20:G" & lastRow).Clear
-    End If
+        ElseIf Not IsDate(ws.Cells(r, 6).Value) Then
 
-    nextRow = 20
+            ws.Cells(r, 2).Value = "Out of Date"
 
-    ' ==================================
-    ' ENHANCED DETAINED
-    ' ==================================
+        ElseIf Not IsDate(ws.Range("B3").Value) Then
 
-    AddReportSection dash, nextRow, _
-        "Results_EnhancedDetained", _
-        "ENHANCED DETAINED - IJ ROLL-ONS", 1, _
-        Array("IJ Code", "Judge Name")
+            ws.Cells(r, 2).Value = "Out of Date"
 
-    AddReportSection dash, nextRow, _
-        "Results_EnhancedDetained", _
-        "ENHANCED DETAINED - IJ ROLL-OFFS", 4, _
-        Array("IJ Code", "Judge Name")
+        ElseIf DateValue(ws.Cells(r, 6).Value) <> _
+               DateValue(ws.Range("B3").Value) Then
 
-    AddReportSection dash, nextRow, _
-        "Results_DFAS", _
-        "ENHANCED DETAINED - VAV COURT ISSUES", 1, _
-        Array("IJ Code", "Judge Name", "VAV Court", _
-              "DFAS Court", "Verification Status")
+            ws.Cells(r, 2).Value = "Out of Date"
 
-    ' ==================================
-    ' DETAINED OPS IJ WEBEX
-    ' ==================================
+        Else
 
-    AddReportSection dash, nextRow, _
-        "Results_WebEx", _
-        "WEBEX - IJ ROLL-ONS", 1, _
-        Array("IJ Code", "Judge Name")
+            ' DFAS and VAV Booths do not require history.
+            If r = 8 Or r = 9 Then
 
-    AddReportSection dash, nextRow, _
-        "Results_WebEx", _
-        "WEBEX - IJ ROLL-OFFS", 4, _
-        Array("IJ Code", "Judge Name")
+                ws.Cells(r, 2).Value = "Imported"
 
-    AddReportSection dash, nextRow, _
-        "Results_DFAS", _
-        "WEBEX - VAV COURT ISSUES", 6, _
-        Array("IJ Code", "Judge Name", "VAV Court", _
-              "DFAS Court", "Verification Status")
+            Else
 
-    ' ==================================
-    ' COMBINED HLOC CHANGES
-    ' ==================================
+                If r = 6 Then
+                    Set hist = ThisWorkbook.Worksheets( _
+                        "History_enhancedDetained")
+                Else
+                    Set hist = ThisWorkbook.Worksheets( _
+                        "History_webEx")
+                End If
 
-    ' One row per IJ, with green HLOC additions,
-    ' red removals and yellow manual verification.
-    AddCombinedHLOCTable dash, nextRow
+                reportDate = DateValue(ws.Range("B3").Value)
+                historyFound = False
 
-    ' ==================================
-    ' WEBEX HOME COURT CHECK
-    ' ==================================
+                lastRow = hist.Cells( _
+                    hist.Rows.Count, "A").End(xlUp).Row
 
-    AddReportSection dash, nextRow, _
-        "Results_HLOC", _
-        "WEBEX - HOME COURT = HLOC", 13, _
-        Array("IJ Code", "Judge Name", "Home Court", _
-              "HLOC", "DFAS Detail Court")
+                For i = 2 To lastRow
 
-    ' ==================================
-    ' VAV BOOTH FACILITY VERIFICATION
-    ' ==================================
+                    If IsDate(hist.Cells(i, "A").Value) Then
 
-    ' Group missing HLOCs by facility.
-    ' Display only Facility Name and Missing HLOC(s).
-    AddVAVFacilityTable dash, nextRow
+                        If DateValue(hist.Cells(i, "A").Value) = _
+                           reportDate Then
 
-    GenerateDashboardReport = True
-    Exit Function
+                            historyFound = True
+                            Exit For
 
-ReportFailed:
+                        End If
 
-    MsgBox "Dashboard generation failed: " & _
-        Err.Description, vbCritical
+                    End If
 
-    GenerateDashboardReport = False
+                Next i
 
-End Function
+                If historyFound Then
+                    ws.Cells(r, 2).Value = "Imported"
+                Else
+                    ws.Cells(r, 2).Value = "Archive Failed"
+                End If
+
+            End If
+
+        End If
+
+    Next r
+
+End Sub
