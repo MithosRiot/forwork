@@ -1,150 +1,186 @@
 
-Sub ImportVAVBoothCount()
+Function CheckVAVBooths() As Boolean
 
     Dim tool As Worksheet
-    Dim dest As Worksheet
-    Dim srcWB As Workbook
-    Dim src As Worksheet
-    Dim filePath As Variant
+    Dim ed As Worksheet
+    Dim vav As Worksheet
+    Dim results As Worksheet
 
-    Dim headerRow As Long
+    Dim edCodes As Object
+    Dim seen As Object
+
     Dim lastRow As Long
-    Dim lastCol As Long
     Dim r As Long
-    Dim c As Long
-    Dim hlocCol As Long
-    Dim facilityCol As Long
-    Dim headerText As String
-    Dim reportDate As Date
-    Dim data As Variant
+    Dim i As Long
+    Dim code As String
+    Dim rawHLOC As String
+    Dim parts As Variant
+    Dim facility As String
+    Dim detloc As String
+    Dim key As String
+    Dim outputRow As Long
+    Dim missingCount As Long
+    Dim failureMessage As String
 
-    On Error GoTo ImportFailed
+    CheckVAVBooths = False
+    On Error GoTo CheckFailed
 
     Set tool = ThisWorkbook.Worksheets("Tool")
-    Set dest = ThisWorkbook.Worksheets("VAV_Booth_Data")
+    Set ed = ThisWorkbook.Worksheets( _
+        "Enhanced Detained - Excel Data")
+    Set vav = ThisWorkbook.Worksheets("VAV_Booth_Data")
+    Set results = ThisWorkbook.Worksheets("Results_VAVBooths")
 
+    ' Validate selected reporting week and imports.
     If Not IsDate(tool.Range("B3").Value) Then
-        MsgBox "Select a valid reporting Friday.", vbExclamation
-        Exit Sub
+        Err.Raise vbObjectError + 1201, , _
+            "Select a valid reporting Friday."
     End If
 
-    reportDate = DateValue(tool.Range("B3").Value)
+    UpdateStatuses
 
-    filePath = Application.GetOpenFilename( _
-        "Excel Files (*.xlsx;*.xlsm;*.xls)," & _
-        "*.xlsx;*.xlsm;*.xls", , _
-        "Select VAV Booth Count Report")
+    If tool.Range("B6").Value <> "Imported" Then
+        Err.Raise vbObjectError + 1202, , _
+            "Enhanced Detained must be current."
+    End If
 
-    If VarType(filePath) = vbBoolean Then Exit Sub
+    If tool.Range("B9").Value <> "Imported" Then
+        Err.Raise vbObjectError + 1203, , _
+            "VAV Booth report must be imported."
+    End If
 
-    Application.ScreenUpdating = False
+    If Not IsDate(tool.Range("F9").Value) Then
+        Err.Raise vbObjectError + 1204, , _
+            "VAV Booth reporting date is missing."
+    End If
 
-    Set srcWB = Workbooks.Open( _
-        Filename:=CStr(filePath), ReadOnly:=True)
+    If DateValue(tool.Range("F9").Value) <> _
+        DateValue(tool.Range("B3").Value) Then
 
-    Set src = srcWB.Worksheets("VAV Court Booth Count")
+        Err.Raise vbObjectError + 1205, , _
+            "VAV Booth import is for a different Friday."
 
-    ' Find the actual table header.
-    For r = 1 To 30
+    End If
 
-        For c = 1 To 15
+    Set edCodes = CreateObject("Scripting.Dictionary")
+    Set seen = CreateObject("Scripting.Dictionary")
 
-            headerText = UCase(Trim(CStr( _
-                src.Cells(r, c).Value)))
+    edCodes.CompareMode = vbTextCompare
+    seen.CompareMode = vbTextCompare
 
-            If headerText = "HLOC" Then
-                headerRow = r
-                hlocCol = c
-                Exit For
+    ' Build unique Enhanced Detained HLOC list.
+    lastRow = ed.Cells(ed.Rows.Count, "C").End(xlUp).Row
+
+    For r = 2 To lastRow
+
+        code = UCase(Trim(CStr(ed.Cells(r, "C").Value)))
+
+        If code <> "" Then
+            If Not edCodes.Exists(code) Then
+                edCodes.Add code, True
             End If
-
-        Next c
-
-        If headerRow > 0 Then Exit For
+        End If
 
     Next r
 
-    If headerRow = 0 Then
-        Err.Raise vbObjectError + 1101, , _
-            "Could not locate the HLOC header."
+    If edCodes.Count = 0 Then
+        Err.Raise vbObjectError + 1206, , _
+            "No Enhanced Detained HLOC codes found."
     End If
 
-    ' Find the Facility Name column.
-    For c = 1 To 15
-
-        headerText = UCase(Trim(CStr( _
-            src.Cells(headerRow, c).Value)))
-
-        If headerText = "FACILITY NAME" Then
-            facilityCol = c
-            Exit For
-        End If
-
-    Next c
-
-    If facilityCol = 0 Then
-        Err.Raise vbObjectError + 1102, , _
-            "Facility Name column was not found."
+    ' Verify VAV Booth headers before processing.
+    If UCase(Trim(CStr(vav.Range("E1").Value))) <> "HLOC" Then
+        Err.Raise vbObjectError + 1207, , _
+            "VAV Booth column E must contain HLOC."
     End If
 
-    lastRow = src.Cells( _
-        src.Rows.Count, hlocCol).End(xlUp).Row
+    ' Clear previous results, preserving headings.
+    results.Range("A5:G10000").ClearContents
 
-    lastCol = src.Cells(headerRow, _
-        src.Columns.Count).End(xlToLeft).Column
+    outputRow = 5
 
-    If lastRow <= headerRow Then
-        Err.Raise vbObjectError + 1103, , _
-            "No HLOC records found."
+    ' Read each VAV facility and split multiple HLOCs.
+    lastRow = vav.Cells(vav.Rows.Count, "E").End(xlUp).Row
+
+    For r = 2 To lastRow
+
+        facility = Trim(CStr(vav.Cells(r, "C").Value))
+        detloc = Trim(CStr(vav.Cells(r, "A").Value))
+
+        rawHLOC = CStr(vav.Cells(r, "E").Value)
+
+        ' Normalize Windows and Unix line breaks.
+        rawHLOC = Replace(rawHLOC, vbCrLf, vbLf)
+        rawHLOC = Replace(rawHLOC, vbCr, vbLf)
+
+        parts = Split(rawHLOC, vbLf)
+
+        For i = LBound(parts) To UBound(parts)
+
+            code = UCase(Trim(CStr(parts(i))))
+
+            If code <> "" Then
+
+                key = UCase(detloc) & "|" & _
+                    UCase(facility) & "|" & code
+
+                If Not edCodes.Exists(code) Then
+
+                    If Not seen.Exists(key) Then
+
+                        seen.Add key, True
+
+                        results.Cells(outputRow, "A").Value = facility
+                        results.Cells(outputRow, "B").Value = detloc
+                        results.Cells(outputRow, "C").Value = _
+                            vav.Cells(r, "D").Value
+
+                        results.Cells(outputRow, "D").Value = code
+
+                        results.Cells(outputRow, "E").Value = _
+                            vav.Cells(r, "F").Value
+
+                        results.Cells(outputRow, "F").Value = _
+                            vav.Cells(r, "H").Value
+
+                        results.Cells(outputRow, "G").Value = _
+                            "Not in Enhanced Detained"
+
+                        outputRow = outputRow + 1
+                        missingCount = missingCount + 1
+
+                    End If
+
+                End If
+
+            End If
+
+        Next i
+
+    Next r
+
+    If missingCount = 0 Then
+        results.Range("A5").Value = "None"
     End If
 
-    ' Read data before modifying existing import.
-    data = src.Range( _
-        src.Cells(headerRow, 1), _
-        src.Cells(lastRow, lastCol)).Value
+    CheckVAVBooths = True
 
-    srcWB.Close SaveChanges:=False
-    Set srcWB = Nothing
+    MsgBox "VAV Booth verification complete." & vbCrLf & _
+        "Missing HLOCs: " & missingCount, vbInformation
 
-    dest.Cells.ClearContents
+    Exit Function
 
-    dest.Range("A1").Resize( _
-        UBound(data, 1), UBound(data, 2)).Value = data
-
-    tool.Range("C9").Value = Dir(CStr(filePath))
-    tool.Range("D9").Value = Now
-    tool.Range("E9").Value = UBound(data, 1) - 1
-    tool.Range("F9").Value = reportDate
-
-    tool.Range("D9").NumberFormat = "m/d/yyyy h:mm AM/PM"
-    tool.Range("F9").NumberFormat = "m/d/yyyy"
-
-    tool.Range("B9").Value = "Imported"
-
-    ResetProcessingStatus
-
-    Application.ScreenUpdating = True
-
-    MsgBox "VAV Booth Count imported successfully.", _
-        vbInformation
-
-    Exit Sub
-
-ImportFailed:
-
-    Dim failureMessage As String
+CheckFailed:
 
     failureMessage = Err.Description
 
-    On Error Resume Next
-
-    If Not srcWB Is Nothing Then
-        srcWB.Close SaveChanges:=False
+    If Not tool Is Nothing Then
+        tool.Range("B11").Value = "Not Ready"
     End If
 
-    Application.ScreenUpdating = True
-
-    MsgBox "VAV Booth import failed: " & _
+    MsgBox "VAV Booth verification failed: " & _
         failureMessage, vbCritical
 
-End Sub
+    CheckVAVBooths = False
+
+End Function
