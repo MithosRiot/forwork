@@ -1,97 +1,74 @@
 
-Sub ImportOutlookReports()
+Sub DiagnoseOutlookReportMatch()
 
     Dim olApp As Object
     Dim olNS As Object
     Dim inbox As Object
-    Dim mailItems As Object
+    Dim items As Object
     Dim mail As Object
     Dim att As Object
-    Dim pa As Object
-
+    Dim senderSMTP As String
+    Dim exUser As Object
     Dim i As Long
-    Dim senderAddress As String
-    Dim edName As String
-    Dim weName As String
-    Dim edPath As String
-    Dim wePath As String
-    Dim tempFolder As String
-    Dim found As Boolean
-    Dim haveED As Boolean
-    Dim haveWE As Boolean
-    Dim tool As Worksheet
-    Dim msg As String
-    Dim errorText As String
+    Dim matched As Long
+    Dim details As String
 
-    On Error GoTo ImportFailed
-
-    Set tool = ThisWorkbook.Worksheets("Tool")
-
-    If Not IsDate(tool.Range("B3").Value) Then
-        MsgBox "Select a reporting Friday first.", vbExclamation
-        Exit Sub
-    End If
+    On Error GoTo Failed
 
     Set olApp = GetObject(, "Outlook.Application")
     Set olNS = olApp.GetNamespace("MAPI")
     Set inbox = olNS.GetDefaultFolder(6)
 
-    Set mailItems = inbox.Items
-    mailItems.Sort "[ReceivedTime]", True
+    Set items = inbox.Items
+    items.Sort "[ReceivedTime]", True
 
-    ' Find the newest matching email with both attachments.
-    For i = 1 To mailItems.Count
+    For i = 1 To items.Count
 
-        If mailItems(i).Class = 43 Then
+        If items(i).Class = 43 Then
 
-            Set mail = mailItems(i)
+            Set mail = items(i)
 
             If InStr(1, mail.Subject, _
                 "EIOR Detained Ops Dockets", _
                 vbTextCompare) > 0 Then
 
-                senderAddress = mail.SenderEmailAddress
+                matched = matched + 1
 
-                ' Resolve Exchange senders to SMTP addresses.
-                If UCase(senderAddress) = "EX" Or _
-                   Left(senderAddress, 3) = "/O=" Then
+                senderSMTP = mail.SenderEmailAddress
+
+                If mail.SenderEmailType = "EX" Then
+                    Set exUser = Nothing
 
                     On Error Resume Next
-                    Set pa = mail.PropertyAccessor
-                    senderAddress = pa.GetProperty( _
-                        "http://schemas.microsoft.com/mapi/" & _
-                        "proptag/0x5D01001F")
-                    Err.Clear
-                    On Error GoTo ImportFailed
+                    Set exUser = _
+                        mail.Sender.GetExchangeUser()
 
-                End If
-
-                If LCase(Trim(senderAddress)) = _
-                    "rene.cervantes@usdoj.gov" Then
-
-                    edName = ""
-                    weName = ""
-
-                    For Each att In mail.Attachments
-
-                        If LCase(att.FileName) = _
-                            "enhanced detained - excel data.xlsx" Then
-                            edName = att.FileName
-                        End If
-
-                        If LCase(att.FileName) Like _
-                            "detained ops ij webex*.xlsx" Then
-                            weName = att.FileName
-                        End If
-
-                    Next att
-
-                    If edName <> "" And weName <> "" Then
-                        found = True
-                        Exit For
+                    If Not exUser Is Nothing Then
+                        senderSMTP = _
+                            exUser.PrimarySmtpAddress
                     End If
 
+                    On Error GoTo Failed
                 End If
+
+                details = _
+                    "Received: " & mail.ReceivedTime & vbCrLf & _
+                    "Sender: " & senderSMTP & vbCrLf & _
+                    "Subject: " & mail.Subject & vbCrLf & _
+                    "Attachments: " & mail.Attachments.Count & _
+                    vbCrLf & vbCrLf
+
+                For Each att In mail.Attachments
+                    details = details & _
+                        att.FileName & vbCrLf
+                Next att
+
+                Debug.Print details
+
+                MsgBox details, vbInformation, _
+                    "Matching Outlook Email"
+
+                Exit Sub
 
             End If
 
@@ -99,99 +76,14 @@ Sub ImportOutlookReports()
 
     Next i
 
-    If Not found Then
-        MsgBox "No matching Outlook email with both " & _
-               "attachments was found in the Inbox.", _
-               vbExclamation
-        Exit Sub
-    End If
-
-    ' Confirm the selected email before importing.
-    msg = "Email received: " & _
-        Format(mail.ReceivedTime, "m/d/yyyy h:mm AM/PM") & _
-        vbCrLf & vbCrLf & _
-        "Enhanced Detained: " & edName & vbCrLf & _
-        "WebEx: " & weName & vbCrLf & vbCrLf & _
-        "Selected reporting Friday: " & _
-        Format(tool.Range("B3").Value, "m/d/yyyy") & _
-        vbCrLf & vbCrLf & _
-        "Import these attachments?"
-
-    If MsgBox(msg, vbYesNo + vbQuestion, _
-              "Confirm Outlook Import") <> vbYes Then
-        Exit Sub
-    End If
-
-    ' Create a unique temporary folder.
-    tempFolder = Environ("TEMP") & "\IJImport_" & _
-        Format(Now, "yyyymmdd_hhnnss")
-
-    MkDir tempFolder
-
-    edPath = tempFolder & "\" & edName
-    wePath = tempFolder & "\" & weName
-
-    ' Save both attachments temporarily.
-    For Each att In mail.Attachments
-
-        If StrComp(att.FileName, edName, _
-                   vbTextCompare) = 0 Then
-            att.SaveAsFile edPath
-            haveED = True
-        End If
-
-        If StrComp(att.FileName, weName, _
-                   vbTextCompare) = 0 Then
-            att.SaveAsFile wePath
-            haveWE = True
-        End If
-
-    Next att
-
-    If Not haveED Or Not haveWE Then
-        Err.Raise vbObjectError + 1501, , _
-            "Unable to save both Outlook attachments."
-    End If
-
-    ' Reuse existing validated imports and history.
-    ImportFile "Enhanced Detained", _
-        "Enhanced Detained - Excel Data", 6, edPath
-
-    ImportFile "Detained Ops IJ WebEx", _
-        "Detained Ops IJ WebEx Data", 7, wePath
-
-    ' Remove temporary files.
-    On Error Resume Next
-    Kill edPath
-    Kill wePath
-    RmDir tempFolder
-    On Error GoTo 0
-
-    MsgBox "Outlook import attempts finished." & vbCrLf & _
-           "Check Tool rows 6 and 7 for import results.", _
-           vbInformation
+    MsgBox "No messages matched the subject." & _
+        vbCrLf & "Emails examined: " & items.Count, _
+        vbExclamation
 
     Exit Sub
 
-ImportFailed:
-
-    errorText = Err.Description
-
-    On Error Resume Next
-
-    If edPath <> "" Then
-        If Dir(edPath) <> "" Then Kill edPath
-    End If
-
-    If wePath <> "" Then
-        If Dir(wePath) <> "" Then Kill wePath
-    End If
-
-    If tempFolder <> "" Then RmDir tempFolder
-
-    On Error GoTo 0
-
-    MsgBox "Outlook import failed: " & errorText, _
-           vbCritical
+Failed:
+    MsgBox "Diagnostic failed: " & Err.Description, _
+        vbCritical
 
 End Sub
