@@ -1,85 +1,13 @@
+Sub ResetProcessingStatus()
 
-Sub UpdateStatuses()
+    Dim tool As Worksheet
 
-    Dim ws As Worksheet
-    Dim hist As Worksheet
-    Dim r As Long
-    Dim lastRow As Long
-    Dim i As Long
-    Dim reportDate As Date
-    Dim historyFound As Boolean
+    Set tool = ThisWorkbook.Worksheets("Tool")
 
-    Set ws = ThisWorkbook.Worksheets("Tool")
+    ' Reset all five verification indicators
+    tool.Range("B25:B29").Value = "Not Run"
 
-    ' Rows 6-9 contain the four required reports.
-    For r = 6 To 9
-
-        If ws.Cells(r, 3).Value = "" Then
-
-            ws.Cells(r, 2).Value = "Missing"
-
-        ElseIf Not IsDate(ws.Cells(r, 6).Value) Then
-
-            ws.Cells(r, 2).Value = "Out of Date"
-
-        ElseIf Not IsDate(ws.Range("B3").Value) Then
-
-            ws.Cells(r, 2).Value = "Out of Date"
-
-        ElseIf DateValue(ws.Cells(r, 6).Value) <> _
-               DateValue(ws.Range("B3").Value) Then
-
-            ws.Cells(r, 2).Value = "Out of Date"
-
-        Else
-
-            ' DFAS and VAV Booths do not require history.
-            If r = 8 Or r = 9 Then
-
-                ws.Cells(r, 2).Value = "Imported"
-
-            Else
-
-                If r = 6 Then
-                    Set hist = ThisWorkbook.Worksheets( _
-                        "History_enhancedDetained")
-                Else
-                    Set hist = ThisWorkbook.Worksheets( _
-                        "History_webEx")
-                End If
-
-                reportDate = DateValue(ws.Range("B3").Value)
-                historyFound = False
-
-                lastRow = hist.Cells( _
-                    hist.Rows.Count, "A").End(xlUp).Row
-
-                For i = 2 To lastRow
-
-                    If IsDate(hist.Cells(i, "A").Value) Then
-
-                        If DateValue(hist.Cells(i, "A").Value) = _
-                           reportDate Then
-
-                            historyFound = True
-                            Exit For
-
-                        End If
-
-                    End If
-
-                Next i
-
-                If historyFound Then
-                    ws.Cells(r, 2).Value = "Imported"
-                Else
-                    ws.Cells(r, 2).Value = "Archive Failed"
-                End If
-
-            End If
-
-        End If
-
-    Next r
+    ' Dashboard must be regenerated
+    tool.Range("B11").Value = "Out of Date"
 
 End Sub
