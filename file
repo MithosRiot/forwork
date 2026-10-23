@@ -1,163 +1,32 @@
-# IJ JUDGE VERIFICATION TOOL — USER INSTRUCTIONS
 
-## 1. PURPOSE
+Sub TestOutlookAccess()
 
-The IJ Judge Verification Tool compares four source reports to identify changes, discrepancies, and items requiring manual verification.
+    Dim outlookApp As Object
+    Dim outlookNS As Object
+    Dim inbox As Object
+    Dim mailItems As Object
 
-The tool does not modify DFAS or any source system. All findings should be reviewed before corrective action is taken.
+    On Error GoTo TestFailed
 
-## 2. REQUIRED REPORTS
+    ' Connect to classic Outlook.
+    Set outlookApp = GetObject(, "Outlook.Application")
 
-| Report | Purpose |
-|---|---|
-| Enhanced Detained | Identifies current detained IJ assignments and hearing location codes (HLOCs). |
-| Detained Ops IJ WebEx | Identifies current WebEx IJ assignments, Home Courts, and HLOCs. |
-| DFAS EIOR Judge List | Provides IJ records, VAV Court status, and assigned Detail Courts. |
-| VAV Booth / Immigration Court List | Identifies facilities and HLOCs for comparison against Enhanced Detained. |
+    Set outlookNS = outlookApp.GetNamespace("MAPI")
+    Set inbox = outlookNS.GetDefaultFolder(6)
 
-## 3. HOW TO RUN THE REPORT
+    Set mailItems = inbox.Items
 
-**Step 1 — Select Reporting Week**
+    MsgBox "Outlook connection successful!" & vbCrLf & _
+           "Mailbox: " & inbox.FolderPath & vbCrLf & _
+           "Inbox item count: " & mailItems.Count, _
+           vbInformation, "Outlook Test"
 
-1. Open the Tool worksheet.
-2. Select the applicable reporting Friday from the dropdown.
-3. Confirm the selected date is correct before importing reports.
+    Exit Sub
 
-**Step 2 — Import the Four Reports**
+TestFailed:
 
-1. Click the import button for Enhanced Detained.
-2. Select the corresponding source Excel file.
-3. Repeat for Detained Ops IJ WebEx, DFAS EIOR Judge List, and VAV Booth.
-4. Confirm that all four report statuses display **Imported** in green.
+    MsgBox "Outlook connection failed." & vbCrLf & _
+           "Error: " & Err.Description, _
+           vbCritical, "Outlook Test"
 
-The filename, import date/time, record count, and reporting date are displayed on the Tool worksheet.
-
-Importing a replacement report replaces that report's current working data. Enhanced Detained and WebEx reports also maintain historical data for comparison.
-
-**Step 3 — Run Verification**
-
-1. Confirm all four reports show Imported.
-2. Click **Run Report**.
-3. Allow all five verification processes to complete.
-4. Confirm each processing indicator shows **Complete**.
-5. Confirm Dashboard Status shows **Up to Date**.
-
-**Step 4 — Review Results**
-
-1. Open the Dashboard worksheet.
-2. Review the summary counts.
-3. Review the detailed findings below the summary.
-4. Investigate discrepancies before making updates to DFAS or other systems.
-
-## 4. UNDERSTANDING THE DASHBOARD
-
-**IJ Roll-Ons**
-
-IJ Codes appearing in the current Enhanced Detained or WebEx report that were absent from the most recently saved preceding report.
-
-**IJ Roll-Offs**
-
-IJ Codes appearing in the preceding report but absent from the current report.
-
-Roll-On/Roll-Off comparisons use the most recent preceding report available, not necessarily the previous calendar week.
-
-**DFAS VAV Court Issues**
-
-Identifies IJs on Enhanced Detained or WebEx whose DFAS VAV Court value is No or whose IJ Code cannot be found in DFAS.
-
-Missing DFAS records require manual verification.
-
-**HLOC Roll-Ons**
-
-HLOCs assigned to current IJs in Enhanced Detained or WebEx that are missing from their DFAS Detail Court assignments.
-
-**HLOC Roll-Offs**
-
-HLOCs assigned in DFAS that are no longer present for the IJ in either current Enhanced Detained or WebEx data.
-
-**Manual Verification**
-
-Highlights discrepancies that cannot be safely resolved automatically, including missing IJ records in DFAS.
-
-**WebEx Home Court = HLOC**
-
-Identifies WebEx records where the Home Court and HLOC match, for additional review.
-
-**Facilities in VAV Booths but Not Enhanced Detained**
-
-Lists facilities whose HLOCs appear in the VAV Booth report but do not appear in the current Enhanced Detained report.
-
-The Dashboard displays:
-
-- Facility Name
-- Missing HLOC(s)
-
-A facility appears once, with its missing HLOC codes grouped together.
-
-## 5. STATUS DEFINITIONS
-
-| Status | Meaning |
-|---|---|
-| Imported | The source report has been imported for the selected reporting date. |
-| Missing | No source report is available. |
-| Out of Date | The report or Dashboard requires updating. |
-| Not Run | Verification has not been performed since the last reset. |
-| Running | Verification is in progress. |
-| Complete | The verification process completed successfully. |
-| Failed | Verification encountered an error. |
-| Up to Date | All required verifications completed and the Dashboard was generated. |
-| Not Ready | Required information is missing or processing could not complete. |
-
-## 6. IMPORTANT OPERATING RULES
-
-1. Always select the correct reporting Friday before importing reports.
-2. All four imports must be current before running verification.
-3. Importing a replacement report invalidates previous processing results.
-4. Run Report again after any import or reporting-week change.
-5. Do not interpret a Roll-On or Roll-Off as confirmation that DFAS requires modification without reviewing the source records.
-6. Do not automatically add missing HLOCs to DFAS based solely on the verification results.
-7. Review Manual Verification findings individually.
-8. Do not edit imported data, historical data, or Results worksheets manually.
-9. Save the workbook after completing a successful reporting cycle.
-
-## 7. TROUBLESHOOTING
-
-**A report shows Missing or Out of Date**
-
-Confirm the reporting Friday, select the correct source file, and import it again.
-
-**Run Report will not complete**
-
-Check the Tool worksheet for missing imports, outdated reports, unavailable historical comparisons, or failed verification indicators.
-
-**Dashboard shows Out of Date**
-
-Run the verification again after confirming all four imports are current.
-
-**Dashboard findings appear incorrect**
-
-Check the source reports and reporting dates first. Review unmatched IJ Codes and HLOCs for source-data inconsistencies.
-
-**An IJ is missing from DFAS**
-
-Treat the result as requiring manual verification. Do not assume the IJ Code is incorrect or substitute another IJ automatically.
-
-**No discrepancies are listed**
-
-A blank or None result may mean no discrepancies were identified for that category. Confirm processing completed successfully.
-
-## 8. REPORTING CHECKLIST
-
-- [ ] Correct reporting Friday selected
-- [ ] Enhanced Detained imported
-- [ ] Detained Ops IJ WebEx imported
-- [ ] DFAS EIOR Judge List imported
-- [ ] VAV Booth report imported
-- [ ] All five verification processes complete
-- [ ] Dashboard status is Up to Date
-- [ ] Summary counts reviewed
-- [ ] Manual Verification findings reviewed
-- [ ] Dashboard results reviewed
-- [ ] Workbook saved
-
-**END OF INSTRUCTIONS**
+End Sub
