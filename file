@@ -1,91 +1,150 @@
-Function GenerateDashboardReport() As Boolean
 
-    Dim dash As Worksheet
-    Dim nextRow As Long
+Sub ImportVAVBoothCount()
+
+    Dim tool As Worksheet
+    Dim dest As Worksheet
+    Dim srcWB As Workbook
+    Dim src As Worksheet
+    Dim filePath As Variant
+
+    Dim headerRow As Long
     Dim lastRow As Long
+    Dim lastCol As Long
+    Dim r As Long
+    Dim c As Long
+    Dim hlocCol As Long
+    Dim facilityCol As Long
+    Dim headerText As String
+    Dim reportDate As Date
+    Dim data As Variant
 
-    On Error GoTo ReportFailed
+    On Error GoTo ImportFailed
 
-    GenerateDashboardReport = False
+    Set tool = ThisWorkbook.Worksheets("Tool")
+    Set dest = ThisWorkbook.Worksheets("VAV_Booth_Data")
 
-    Set dash = ThisWorkbook.Worksheets("Dashboard")
-
-    ' Preserve the Dashboard header and summary.
-    ' Clear only the generated report area.
-    lastRow = dash.Cells(dash.Rows.Count, "A").End(xlUp).Row
-
-    If lastRow >= 20 Then
-        dash.Range("A20:F" & lastRow).Clear
+    If Not IsDate(tool.Range("B3").Value) Then
+        MsgBox "Select a valid reporting Friday.", vbExclamation
+        Exit Sub
     End If
 
-    nextRow = 20
+    reportDate = DateValue(tool.Range("B3").Value)
 
-    ' ==================================
-    ' ENHANCED DETAINED
-    ' ==================================
+    filePath = Application.GetOpenFilename( _
+        "Excel Files (*.xlsx;*.xlsm;*.xls)," & _
+        "*.xlsx;*.xlsm;*.xls", , _
+        "Select VAV Booth Count Report")
 
-    AddReportSection dash, nextRow, _
-        "Results_EnhancedDetained", _
-        "ENHANCED DETAINED - IJ ROLL-ONS", 1, _
-        Array("IJ Code", "Judge Name")
+    If VarType(filePath) = vbBoolean Then Exit Sub
 
-    AddReportSection dash, nextRow, _
-        "Results_EnhancedDetained", _
-        "ENHANCED DETAINED - IJ ROLL-OFFS", 4, _
-        Array("IJ Code", "Judge Name")
+    Application.ScreenUpdating = False
 
-    AddReportSection dash, nextRow, _
-        "Results_DFAS", _
-        "ENHANCED DETAINED - VAV COURT ISSUES", 1, _
-        Array("IJ Code", "Judge Name", "VAV Court", _
-              "DFAS Court", "Verification Status")
+    Set srcWB = Workbooks.Open( _
+        Filename:=CStr(filePath), ReadOnly:=True)
 
-    ' ==================================
-    ' DETAINED OPS IJ WEBEX
-    ' ==================================
+    Set src = srcWB.Worksheets("VAV Court Booth Count")
 
-    AddReportSection dash, nextRow, _
-        "Results_WebEx", _
-        "WEBEX - IJ ROLL-ONS", 1, _
-        Array("IJ Code", "Judge Name")
+    ' Find the actual table header.
+    For r = 1 To 30
 
-    AddReportSection dash, nextRow, _
-        "Results_WebEx", _
-        "WEBEX - IJ ROLL-OFFS", 4, _
-        Array("IJ Code", "Judge Name")
+        For c = 1 To 15
 
-    AddReportSection dash, nextRow, _
-        "Results_DFAS", _
-        "WEBEX - VAV COURT ISSUES", 6, _
-        Array("IJ Code", "Judge Name", "VAV Court", _
-              "DFAS Court", "Verification Status")
+            headerText = UCase(Trim(CStr( _
+                src.Cells(r, c).Value)))
 
-    ' ==================================
-    ' COMBINED HLOC CHANGES
-    ' ==================================
+            If headerText = "HLOC" Then
+                headerRow = r
+                hlocCol = c
+                Exit For
+            End If
 
-    ' One row per IJ, with actual HLOC codes
-    ' grouped into Roll-On and Roll-Off columns.
-    AddCombinedHLOCTable dash, nextRow
+        Next c
 
-    ' ==================================
-    ' WEBEX HOME COURT CHECK
-    ' ==================================
+        If headerRow > 0 Then Exit For
 
-    AddReportSection dash, nextRow, _
-        "Results_HLOC", _
-        "WEBEX - HOME COURT = HLOC", 13, _
-        Array("IJ Code", "Judge Name", "Home Court", _
-              "HLOC", "DFAS Detail Court")
+    Next r
 
-    GenerateDashboardReport = True
-    Exit Function
+    If headerRow = 0 Then
+        Err.Raise vbObjectError + 1101, , _
+            "Could not locate the HLOC header."
+    End If
 
-ReportFailed:
+    ' Find the Facility Name column.
+    For c = 1 To 15
 
-    MsgBox "Dashboard generation failed: " & _
-        Err.Description, vbCritical
+        headerText = UCase(Trim(CStr( _
+            src.Cells(headerRow, c).Value)))
 
-    GenerateDashboardReport = False
+        If headerText = "FACILITY NAME" Then
+            facilityCol = c
+            Exit For
+        End If
 
-End Function
+    Next c
+
+    If facilityCol = 0 Then
+        Err.Raise vbObjectError + 1102, , _
+            "Facility Name column was not found."
+    End If
+
+    lastRow = src.Cells( _
+        src.Rows.Count, hlocCol).End(xlUp).Row
+
+    lastCol = src.Cells(headerRow, _
+        src.Columns.Count).End(xlToLeft).Column
+
+    If lastRow <= headerRow Then
+        Err.Raise vbObjectError + 1103, , _
+            "No HLOC records found."
+    End If
+
+    ' Read data before modifying existing import.
+    data = src.Range( _
+        src.Cells(headerRow, 1), _
+        src.Cells(lastRow, lastCol)).Value
+
+    srcWB.Close SaveChanges:=False
+    Set srcWB = Nothing
+
+    dest.Cells.ClearContents
+
+    dest.Range("A1").Resize( _
+        UBound(data, 1), UBound(data, 2)).Value = data
+
+    tool.Range("C9").Value = Dir(CStr(filePath))
+    tool.Range("D9").Value = Now
+    tool.Range("E9").Value = UBound(data, 1) - 1
+    tool.Range("F9").Value = reportDate
+
+    tool.Range("D9").NumberFormat = "m/d/yyyy h:mm AM/PM"
+    tool.Range("F9").NumberFormat = "m/d/yyyy"
+
+    tool.Range("B9").Value = "Imported"
+
+    ResetProcessingStatus
+
+    Application.ScreenUpdating = True
+
+    MsgBox "VAV Booth Count imported successfully.", _
+        vbInformation
+
+    Exit Sub
+
+ImportFailed:
+
+    Dim failureMessage As String
+
+    failureMessage = Err.Description
+
+    On Error Resume Next
+
+    If Not srcWB Is Nothing Then
+        srcWB.Close SaveChanges:=False
+    End If
+
+    Application.ScreenUpdating = True
+
+    MsgBox "VAV Booth import failed: " & _
+        failureMessage, vbCritical
+
+End Sub
