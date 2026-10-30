@@ -1,89 +1,72 @@
 
-Sub DiagnoseOutlookReportMatch()
+let
+    t = if [Matter_Normalized] = null
+        then ""
+        else [Matter_Normalized],
 
-    Dim olApp As Object
-    Dim olNS As Object
-    Dim inbox As Object
-    Dim items As Object
-    Dim mail As Object
-    Dim att As Object
-    Dim senderSMTP As String
-    Dim exUser As Object
-    Dim i As Long
-    Dim matched As Long
-    Dim details As String
+    Has = (terms as list) as logical =>
+        List.AnyTrue(
+            List.Transform(
+                terms,
+                each Text.Contains(t, _)
+            )
+        ),
 
-    On Error GoTo Failed
+    Categories = {
+        if Has({"all immigration matters", "all immigrant matters"})
+            then "All Immigration Matters" else null,
 
-    Set olApp = GetObject(, "Outlook.Application")
-    Set olNS = olApp.GetNamespace("MAPI")
-    Set inbox = olNS.GetDefaultFolder(6)
+        if Has({"all matters before ero", "all matter before ero", "all ero matters"})
+            then "All Matters Before ERO" else null,
 
-    Set items = inbox.Items
-    items.Sort "[ReceivedTime]", True
+        if Has({"cfi", "rfi", "credible fear", "reasonable fear"})
+            then "CFI/RFI" else null,
 
-    For i = 1 To items.Count
+        if Has({"bond", "bnd"})
+            then "Bond" else null,
 
-        If items(i).Class = 43 Then
+        if Has({"asylum", "i-589", "i589"})
+            then "Asylum" else null,
 
-            Set mail = items(i)
+        if Has({"t visa", "u visa", "vawa", "tps", "adjustment of status"})
+            then "Other Immigration Relief" else null,
 
-            If InStr(1, mail.Subject, _
-                "EIOR Detained Ops Dockets", _
-                vbTextCompare) > 0 Then
+        if Has({"parole", "release request", "release from custody"})
+            then "Parole or Release" else null,
 
-                matched = matched + 1
+        if Has({"parental interest", "repatriation", "reunification"})
+            then "Parental Interest/Joint Repatriation" else null,
 
-                senderSMTP = mail.SenderEmailAddress
+        if Has({"criminal", "crim."})
+            then "Criminal Matter" else null,
 
-                If mail.SenderEmailType = "EX" Then
-                    Set exUser = Nothing
+        if Has({"child welfare", "family court"})
+            then "Child Welfare/Family Court" else null,
 
-                    On Error Resume Next
-                    Set exUser = _
-                        mail.Sender.GetExchangeUser()
+        if Has({"civil proceeding", "civil matter"})
+            then "Other Civil Proceeding" else null,
 
-                    If Not exUser Is Nothing Then
-                        senderSMTP = _
-                            exUser.PrimarySmtpAddress
-                    End If
+        if Has({"custody review", "custody redetermination", "custody"})
+            then "Custody Review" else null,
 
-                    On Error GoTo Failed
-                End If
+        if Has({"detention", "detainee", "detained"})
+            then "Detention" else null,
 
-                details = _
-                    "Received: " & mail.ReceivedTime & vbCrLf & _
-                    "Sender: " & senderSMTP & vbCrLf & _
-                    "Subject: " & mail.Subject & vbCrLf & _
-                    "Attachments: " & mail.Attachments.Count & _
-                    vbCrLf & vbCrLf
+        if Has({"habeas"})
+            then "Habeas" else null,
 
-                For Each att In mail.Attachments
-                    details = details & _
-                        att.FileName & vbCrLf
-                Next att
+        if Has({"appeal", "bia appeal"})
+            then "Appeal" else null,
 
-                Debug.Print details
+        if Has({"stay of removal"})
+            then "Stay of Removal" else null,
 
-                MsgBox details, vbInformation, _
-                    "Matching Outlook Email"
+        if Has({"qualified representative"})
+            then "Qualified Representative" else null
+    },
 
-                Exit Sub
-
-            End If
-
-        End If
-
-    Next i
-
-    MsgBox "No messages matched the subject." & _
-        vbCrLf & "Emails examined: " & items.Count, _
-        vbExclamation
-
-    Exit Sub
-
-Failed:
-    MsgBox "Diagnostic failed: " & Err.Description, _
-        vbCritical
-
-End Sub
+    Matches = List.RemoveNulls(Categories)
+in
+    if List.Count(Matches) = 0
+    then "UNMATCHED"
+    else Text.Combine(Matches, " | ")
