@@ -4,12 +4,75 @@ let
 
     Source = Web.Contents(URL),
 
+    // Extract headings in their original page order
     Headings = Html.Table(
         Source,
-        {
-            {"Heading", "h2, h3"}
-        },
+        {{"Heading", "h2, h3"}},
         [RowSelector = "h2, h3"]
+    ),
+
+    CleanHeadings = Table.TransformColumns(
+        Headings,
+        {{"Heading", each Text.Trim(Text.From(_)), type text}}
+    ),
+
+    // Identify actual state headings
+    States = {
+        "Alabama", "Alaska", "Arizona", "Arkansas",
+        "California", "Colorado", "Connecticut",
+        "Delaware", "Florida", "Georgia", "Hawaii",
+        "Idaho", "Illinois", "Indiana", "Iowa",
+        "Kansas", "Kentucky", "Louisiana", "Maine",
+        "Maryland", "Massachusetts", "Michigan",
+        "Minnesota", "Mississippi", "Missouri",
+        "Montana", "Nebraska", "Nevada",
+        "New Hampshire", "New Jersey", "New Mexico",
+        "New York", "North Carolina", "North Dakota",
+        "Ohio", "Oklahoma", "Oregon", "Pennsylvania",
+        "Rhode Island", "South Carolina",
+        "South Dakota", "Tennessee", "Texas",
+        "Utah", "Vermont", "Virginia", "Washington",
+        "West Virginia", "Wisconsin", "Wyoming",
+        "District of Columbia", "Puerto Rico"
+    },
+
+    // Mark rows that contain a state name
+    AddState = Table.AddColumn(
+        CleanHeadings,
+        "State",
+        each
+            if List.Contains(States, [Heading])
+            then [Heading]
+            else null,
+        type text
+    ),
+
+    // Carry each state down to its courts
+    FillStates = Table.FillDown(
+        AddState,
+        {"State"}
+    ),
+
+    // Keep court headings only
+    CourtsOnly = Table.SelectRows(
+        FillStates,
+        each
+            Text.Contains(
+                [Heading],
+                "Immigration Court",
+                Comparer.OrdinalIgnoreCase
+            )
+            and [State] <> null
+    ),
+
+    RenameCourt = Table.RenameColumns(
+        CourtsOnly,
+        {{"Heading", "Court"}}
+    ),
+
+    Final = Table.SelectColumns(
+        RenameCourt,
+        {"Court", "State"}
     )
 in
-    Headings
+    Final
