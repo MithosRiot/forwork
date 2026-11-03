@@ -1,72 +1,35 @@
-
 let
-    t = if [Matter_Normalized] = null
-        then ""
-        else [Matter_Normalized],
+    URL = "https://www.justice.gov/eoir/find-immigration-court-and-access-internet-based-hearings",
+    Source = Web.Page(Web.Contents(URL)),
 
-    Has = (terms as list) as logical =>
-        List.AnyTrue(
+    // Find tables, including those nested within page sections
+    FindTables = (items as table, optional parent as nullable text) as list =>
+        List.Combine(
             List.Transform(
-                terms,
-                each Text.Contains(t, _)
+                Table.ToRecords(items),
+                (item) =>
+                    let
+                        Name = try Text.From(item[Name]) otherwise "",
+                        Section = if Text.Contains(Name, "Immigration Court", Comparer.OrdinalIgnoreCase)
+                                  then Name else parent,
+                        Data = try item[Data] otherwise null,
+                        Children = try item[Children] otherwise null,
+                        Current = if Data is table and
+                                     Table.ColumnCount(Data) = 3 and
+                                     Section <> null
+                                  then {[
+                                      Court = Section,
+                                      Data = Data
+                                  ]} else {},
+                        Nested = if Children is table
+                                 then @FindTables(Children, Section)
+                                 else {}
+                    in
+                        List.Combine({Current, Nested})
             )
         ),
 
-    Categories = {
-        if Has({"all immigration matters", "all immigrant matters"})
-            then "All Immigration Matters" else null,
-
-        if Has({"all matters before ero", "all matter before ero", "all ero matters"})
-            then "All Matters Before ERO" else null,
-
-        if Has({"cfi", "rfi", "credible fear", "reasonable fear"})
-            then "CFI/RFI" else null,
-
-        if Has({"bond", "bnd"})
-            then "Bond" else null,
-
-        if Has({"asylum", "i-589", "i589"})
-            then "Asylum" else null,
-
-        if Has({"t visa", "u visa", "vawa", "tps", "adjustment of status"})
-            then "Other Immigration Relief" else null,
-
-        if Has({"parole", "release request", "release from custody"})
-            then "Parole or Release" else null,
-
-        if Has({"parental interest", "repatriation", "reunification"})
-            then "Parental Interest/Joint Repatriation" else null,
-
-        if Has({"criminal", "crim."})
-            then "Criminal Matter" else null,
-
-        if Has({"child welfare", "family court"})
-            then "Child Welfare/Family Court" else null,
-
-        if Has({"civil proceeding", "civil matter"})
-            then "Other Civil Proceeding" else null,
-
-        if Has({"custody review", "custody redetermination", "custody"})
-            then "Custody Review" else null,
-
-        if Has({"detention", "detainee", "detained"})
-            then "Detention" else null,
-
-        if Has({"habeas"})
-            then "Habeas" else null,
-
-        if Has({"appeal", "bia appeal"})
-            then "Appeal" else null,
-
-        if Has({"stay of removal"})
-            then "Stay of Removal" else null,
-
-        if Has({"qualified representative"})
-            then "Qualified Representative" else null
-    },
-
-    Matches = List.RemoveNulls(Categories)
+    CourtTables = FindTables(Source),
+    Output = Table.FromRecords(CourtTables)
 in
-    if List.Count(Matches) = 0
-    then "UNMATCHED"
-    else Text.Combine(Matches, " | ")
+    Output
