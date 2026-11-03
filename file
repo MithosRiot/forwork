@@ -1,10 +1,8 @@
 let
-    // DOJ immigration court directory
     URL = "https://www.justice.gov/eoir/find-immigration-court-and-access-internet-based-hearings",
 
     Source = Web.Page(Web.Contents(URL)),
 
-    // Keep the immigration court tables
     Courts = Table.SelectRows(
         Source,
         each
@@ -27,14 +25,9 @@ let
         {{"Caption", "Court"}}
     ),
 
-    // Standardize every court table individually
-    // before combining the data
     NormalizeCourt = (t as table, court as text) as table =>
         let
-            // Use column positions because the DOJ
-            // tables have inconsistent headers
             Cols = Table.ColumnNames(t),
-
             FirstThree = List.FirstN(Cols, 3),
 
             Selected = Table.SelectColumns(
@@ -42,7 +35,6 @@ let
                 FirstThree
             ),
 
-            // Assign consistent temporary names
             TempNames = List.Transform(
                 {0..List.Count(FirstThree)-1},
                 each "TempColumn" & Text.From(_ + 1)
@@ -53,7 +45,6 @@ let
                 List.Zip({FirstThree, TempNames})
             ),
 
-            // Assign final column names
             StandardNames = Table.RenameColumns(
                 TempRename,
                 {
@@ -63,20 +54,14 @@ let
                 }
             ),
 
-            // Remove repeated header rows
             RemoveHeaders = Table.SelectRows(
                 StandardNames,
                 each
                     [Judge Name] <> null
-                    and Text.Trim(
-                        Text.From([Judge Name])
-                    ) <> ""
-                    and Text.Trim(
-                        Text.From([Judge Name])
-                    ) <> "Judge Name"
+                    and Text.Trim(Text.From([Judge Name])) <> ""
+                    and Text.Trim(Text.From([Judge Name])) <> "Judge Name"
             ),
 
-            // Add court to every judge
             AddCourt = Table.AddColumn(
                 RemoveHeaders,
                 "Court",
@@ -86,60 +71,62 @@ let
         in
             AddCourt,
 
-    // Process every immigration court
     AddJudges = Table.AddColumn(
         RenameCourt,
         "Judges",
         each NormalizeCourt([Data], [Court])
     ),
 
-    // Combine all courts into one list
-    Combined = Table.Combine(
-        AddJudges[Judges]
-    ),
+    Combined = Table.Combine(AddJudges[Judges]),
 
-    // Extract judge code from final parentheses
+    // Only extract a code when the name
+    // ends with a parenthesized value
     AddJudgeCode = Table.AddColumn(
         Combined,
         "Judge Code",
         each
             let
-                Judge = Text.From([Judge Name]),
-                Code = try
-                    Text.BetweenDelimiters(
-                        Judge,
-                        "(",
-                        ")",
-                        {0, RelativePosition.FromEnd}
-                    )
-                otherwise null
+                Name = Text.Trim(Text.From([Judge Name])),
+                HasCode =
+                    Text.EndsWith(Name, ")")
+                    and Text.Contains(Name, "("),
+
+                Code =
+                    if HasCode then
+                        try Text.BetweenDelimiters(
+                            Name, "(", ")",
+                            {0, RelativePosition.FromEnd},
+                            0
+                        ) otherwise null
+                    else null
             in
                 if Code = null then null
                 else Text.Trim(Code),
         type text
     ),
 
-    // Clean judge name by removing final code
+    // Preserve full name when no code exists
     CleanJudgeName = Table.AddColumn(
         AddJudgeCode,
         "Judge Name Clean",
         each
             let
-                Name = Text.From([Judge Name]),
+                Name = Text.Trim(Text.From([Judge Name])),
                 Code = [Judge Code]
             in
-                if Code = null then Name
-                else Text.Trim(
-                    Text.BeforeDelimiter(
-                        Name,
-                        "(",
-                        {0, RelativePosition.FromEnd}
-                    )
-                ),
+                if Code = null or Code = "" then
+                    Name
+                else
+                    Text.Trim(
+                        Text.BeforeDelimiter(
+                            Name,
+                            "(",
+                            {0, RelativePosition.FromEnd}
+                        )
+                    ),
         type text
     ),
 
-    // Organize columns
     Final = Table.ReorderColumns(
         CleanJudgeName,
         {
