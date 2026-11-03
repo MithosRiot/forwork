@@ -1,48 +1,34 @@
-let
-    URL = "https://www.justice.gov/eoir/find-immigration-court-and-access-internet-based-hearings",
-    Source = Web.Page(Web.Contents(URL)),
 
-    // Keep only court tables
-    Courts = Table.SelectRows(
-        Source,
-        each [Caption] <> null
-            and Text.Contains(
-                [Caption],
-                "Immigration Court",
-                Comparer.OrdinalIgnoreCase
-            )
-            and [Data] is table
+    // Remove repeated headers from individual court tables
+    RemoveHeaders = Table.SelectRows(
+        Combined,
+        each [Column1] <> null
+            and Text.Trim(Text.From([Column1])) <> "Judge Name"
     ),
 
-    // Preserve the court name and expand judge information
-    KeepColumns = Table.SelectColumns(
-        Courts,
-        {"Caption", "Data"}
+    // Give columns meaningful names
+    RenameColumns = Table.RenameColumns(
+        RemoveHeaders,
+        {
+            {"Column1", "Judge Name"},
+            {"Column2", "Internet-Based Hearing Link"},
+            {"Column3", "Access Code"}
+        }
     ),
 
-    RenameCourt = Table.RenameColumns(
-        KeepColumns,
-        {{"Caption", "Court"}}
-    ),
-
-    // Combine each court's judge records
-    AddJudges = Table.AddColumn(
-        RenameCourt,
-        "Judges",
+    // Extract judge code from final parentheses
+    AddJudgeCode = Table.AddColumn(
+        RenameColumns,
+        "Judge Code",
         each
             let
-                CourtName = [Court],
-                JudgeData = [Data],
-                WithCourt = Table.AddColumn(
-                    JudgeData,
-                    "Court",
-                    each CourtName,
-                    type text
-                )
+                Name = [Judge Name],
+                Code = try Text.BetweenDelimiters(
+                    Name, "(", ")", {0, RelativePosition.FromEnd}
+                ) otherwise null
             in
-                WithCourt
-    ),
-
-    Combined = Table.Combine(AddJudges[Judges])
+                Code,
+        type text
+    )
 in
-    Combined
+    AddJudgeCode
