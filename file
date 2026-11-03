@@ -2,34 +2,47 @@ let
     URL = "https://www.justice.gov/eoir/find-immigration-court-and-access-internet-based-hearings",
     Source = Web.Page(Web.Contents(URL)),
 
-    // Find tables, including those nested within page sections
-    FindTables = (items as table, optional parent as nullable text) as list =>
-        List.Combine(
-            List.Transform(
-                Table.ToRecords(items),
-                (item) =>
-                    let
-                        Name = try Text.From(item[Name]) otherwise "",
-                        Section = if Text.Contains(Name, "Immigration Court", Comparer.OrdinalIgnoreCase)
-                                  then Name else parent,
-                        Data = try item[Data] otherwise null,
-                        Children = try item[Children] otherwise null,
-                        Current = if Data is table and
-                                     Table.ColumnCount(Data) = 3 and
-                                     Section <> null
-                                  then {[
-                                      Court = Section,
-                                      Data = Data
-                                  ]} else {},
-                        Nested = if Children is table
-                                 then @FindTables(Children, Section)
-                                 else {}
-                    in
-                        List.Combine({Current, Nested})
+    // Keep only court tables
+    Courts = Table.SelectRows(
+        Source,
+        each [Caption] <> null
+            and Text.Contains(
+                [Caption],
+                "Immigration Court",
+                Comparer.OrdinalIgnoreCase
             )
-        ),
+            and [Data] is table
+    ),
 
-    CourtTables = FindTables(Source),
-    Output = Table.FromRecords(CourtTables)
+    // Preserve the court name and expand judge information
+    KeepColumns = Table.SelectColumns(
+        Courts,
+        {"Caption", "Data"}
+    ),
+
+    RenameCourt = Table.RenameColumns(
+        KeepColumns,
+        {{"Caption", "Court"}}
+    ),
+
+    // Combine each court's judge records
+    AddJudges = Table.AddColumn(
+        RenameCourt,
+        "Judges",
+        each
+            let
+                CourtName = [Court],
+                JudgeData = [Data],
+                WithCourt = Table.AddColumn(
+                    JudgeData,
+                    "Court",
+                    each CourtName,
+                    type text
+                )
+            in
+                WithCourt
+    ),
+
+    Combined = Table.Combine(AddJudges[Judges])
 in
-    Output
+    Combined
