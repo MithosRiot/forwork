@@ -1,12 +1,16 @@
+
 let
     URL = "https://www.justice.gov/eoir/find-immigration-court-and-access-internet-based-hearings",
 
     Source = Web.Page(Web.Contents(URL)),
 
+    // Recognized administrative titles
+    Titles = {"RDCIJ", "ACIJ", "DCIJ", "CIJ"},
+
+    // Keep the immigration court tables
     Courts = Table.SelectRows(
         Source,
-        each
-            [Caption] <> null
+        each [Caption] <> null
             and Text.Contains(
                 Text.From([Caption]),
                 "Immigration Court",
@@ -25,6 +29,7 @@ let
         {{"Caption", "Court"}}
     ),
 
+    // Normalize each court's table
     NormalizeCourt = (t as table, court as text) as table =>
         let
             Cols = Table.ColumnNames(t),
@@ -36,8 +41,8 @@ let
             ),
 
             TempNames = List.Transform(
-                {0..List.Count(FirstThree)-1},
-                each "TempColumn" & Text.From(_ + 1)
+                {1..List.Count(FirstThree)},
+                each "TempColumn" & Text.From(_)
             ),
 
             TempRename = Table.RenameColumns(
@@ -56,8 +61,7 @@ let
 
             RemoveHeaders = Table.SelectRows(
                 StandardNames,
-                each
-                    [Judge Name] <> null
+                each [Judge Name] <> null
                     and Text.Trim(Text.From([Judge Name])) <> ""
                     and Text.Trim(Text.From([Judge Name])) <> "Judge Name"
             ),
@@ -79,7 +83,7 @@ let
 
     Combined = Table.Combine(AddJudges[Judges]),
 
-    // Only extract a code when the name
+    // Extract a judge code only when the name
     // ends with a parenthesized value
     AddJudgeCode = Table.AddColumn(
         Combined,
@@ -87,51 +91,105 @@ let
         each
             let
                 Name = Text.Trim(Text.From([Judge Name])),
-                HasCode =
-                    Text.EndsWith(Name, ")")
-                    and Text.Contains(Name, "("),
-
-                Code =
-                    if HasCode then
-                        try Text.BetweenDelimiters(
-                            Name, "(", ")",
-                            {0, RelativePosition.FromEnd},
-                            0
-                        ) otherwise null
-                    else null
+                OpenPos = Text.PositionOf(
+                    Name,
+                    "(",
+                    Occurrence.Last
+                ),
+                HasCode = OpenPos >= 0
+                    and Text.EndsWith(Name, ")"),
+                Code = if HasCode then
+                    Text.Trim(
+                        Text.Middle(
+                            Name,
+                            OpenPos + 1,
+                            Text.Length(Name) - OpenPos - 2
+                        )
+                    )
+                else null
             in
-                if Code = null then null
-                else Text.Trim(Code),
+                if Code = null or Code = ""
+                then null
+                else Code,
         type text
     ),
 
-    // Preserve full name when no code exists
-    CleanJudgeName = Table.AddColumn(
+    // Extract any recognized leading title
+    AddTitle = Table.AddColumn(
         AddJudgeCode,
+        "Judge Title",
+        each
+            let
+                Name = Text.Trim(Text.From([Judge Name])),
+                FirstWord = Text.Upper(
+                    List.First(
+                        Text.Split(Name, " ")
+                    )
+                )
+            in
+                if List.Contains(Titles, FirstWord)
+                then FirstWord
+                else null,
+        type text
+    ),
+
+    // Remove judge code and administrative title
+    // without removing the actual judge
+    CleanJudgeName = Table.AddColumn(
+        AddTitle,
         "Judge Name Clean",
         each
             let
                 Name = Text.Trim(Text.From([Judge Name])),
-                Code = [Judge Code]
-            in
-                if Code = null or Code = "" then
-                    Name
-                else
-                    Text.Trim(
-                        Text.BeforeDelimiter(
+                Code = [Judge Code],
+                Title = [Judge Title],
+
+                WithoutCode =
+                    if Code = null then Name
+                    else Text.Trim(
+                        Text.Start(
                             Name,
-                            "(",
-                            {0, RelativePosition.FromEnd}
+                            Text.PositionOf(
+                                Name,
+                                "(",
+                                Occurrence.Last
+                            )
                         )
                     ),
+
+                WithoutTitle =
+                    if Title = null then WithoutCode
+                    else Text.Trim(
+                        Text.Range(
+                            WithoutCode,
+                            Text.Length(Title)
+                        )
+                    )
+            in
+                WithoutTitle,
         type text
     ),
 
-    Final = Table.ReorderColumns(
+    // All fields stay as text
+    SetTypes = Table.TransformColumnTypes(
         CleanJudgeName,
+        {
+            {"Judge Code", type text},
+            {"Judge Title", type text},
+            {"Judge Name Clean", type text},
+            {"Judge Name", type text},
+            {"Internet-Based Hearing Link", type text},
+            {"Access Code", type text},
+            {"Court", type text}
+        }
+    ),
+
+    Final = Table.ReorderColumns(
+        SetTypes,
         {
             "Judge Code",
             "Judge Name Clean",
+            "Judge Title",
             "Judge Name",
             "Internet-Based Hearing Link",
             "Access Code",
