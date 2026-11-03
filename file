@@ -1,34 +1,155 @@
+let
+    // DOJ immigration court directory
+    URL = "https://www.justice.gov/eoir/find-immigration-court-and-access-internet-based-hearings",
 
-    // Remove repeated headers from individual court tables
-    RemoveHeaders = Table.SelectRows(
-        Combined,
-        each [Column1] <> null
-            and Text.Trim(Text.From([Column1])) <> "Judge Name"
+    Source = Web.Page(Web.Contents(URL)),
+
+    // Keep the immigration court tables
+    Courts = Table.SelectRows(
+        Source,
+        each
+            [Caption] <> null
+            and Text.Contains(
+                Text.From([Caption]),
+                "Immigration Court",
+                Comparer.OrdinalIgnoreCase
+            )
+            and [Data] is table
     ),
 
-    // Give columns meaningful names
-    RenameColumns = Table.RenameColumns(
-        RemoveHeaders,
-        {
-            {"Column1", "Judge Name"},
-            {"Column2", "Internet-Based Hearing Link"},
-            {"Column3", "Access Code"}
-        }
+    KeepColumns = Table.SelectColumns(
+        Courts,
+        {"Caption", "Data"}
+    ),
+
+    RenameCourt = Table.RenameColumns(
+        KeepColumns,
+        {{"Caption", "Court"}}
+    ),
+
+    // Standardize every court table individually
+    // before combining the data
+    NormalizeCourt = (t as table, court as text) as table =>
+        let
+            // Use column positions because the DOJ
+            // tables have inconsistent headers
+            Cols = Table.ColumnNames(t),
+
+            FirstThree = List.FirstN(Cols, 3),
+
+            Selected = Table.SelectColumns(
+                t,
+                FirstThree
+            ),
+
+            // Assign consistent temporary names
+            TempNames = List.Transform(
+                {0..List.Count(FirstThree)-1},
+                each "TempColumn" & Text.From(_ + 1)
+            ),
+
+            TempRename = Table.RenameColumns(
+                Selected,
+                List.Zip({FirstThree, TempNames})
+            ),
+
+            // Assign final column names
+            StandardNames = Table.RenameColumns(
+                TempRename,
+                {
+                    {"TempColumn1", "Judge Name"},
+                    {"TempColumn2", "Internet-Based Hearing Link"},
+                    {"TempColumn3", "Access Code"}
+                }
+            ),
+
+            // Remove repeated header rows
+            RemoveHeaders = Table.SelectRows(
+                StandardNames,
+                each
+                    [Judge Name] <> null
+                    and Text.Trim(
+                        Text.From([Judge Name])
+                    ) <> ""
+                    and Text.Trim(
+                        Text.From([Judge Name])
+                    ) <> "Judge Name"
+            ),
+
+            // Add court to every judge
+            AddCourt = Table.AddColumn(
+                RemoveHeaders,
+                "Court",
+                each court,
+                type text
+            )
+        in
+            AddCourt,
+
+    // Process every immigration court
+    AddJudges = Table.AddColumn(
+        RenameCourt,
+        "Judges",
+        each NormalizeCourt([Data], [Court])
+    ),
+
+    // Combine all courts into one list
+    Combined = Table.Combine(
+        AddJudges[Judges]
     ),
 
     // Extract judge code from final parentheses
     AddJudgeCode = Table.AddColumn(
-        RenameColumns,
+        Combined,
         "Judge Code",
         each
             let
-                Name = [Judge Name],
-                Code = try Text.BetweenDelimiters(
-                    Name, "(", ")", {0, RelativePosition.FromEnd}
-                ) otherwise null
+                Judge = Text.From([Judge Name]),
+                Code = try
+                    Text.BetweenDelimiters(
+                        Judge,
+                        "(",
+                        ")",
+                        {0, RelativePosition.FromEnd}
+                    )
+                otherwise null
             in
-                Code,
+                if Code = null then null
+                else Text.Trim(Code),
         type text
+    ),
+
+    // Clean judge name by removing final code
+    CleanJudgeName = Table.AddColumn(
+        AddJudgeCode,
+        "Judge Name Clean",
+        each
+            let
+                Name = Text.From([Judge Name]),
+                Code = [Judge Code]
+            in
+                if Code = null then Name
+                else Text.Trim(
+                    Text.BeforeDelimiter(
+                        Name,
+                        "(",
+                        {0, RelativePosition.FromEnd}
+                    )
+                ),
+        type text
+    ),
+
+    // Organize columns
+    Final = Table.ReorderColumns(
+        CleanJudgeName,
+        {
+            "Judge Code",
+            "Judge Name Clean",
+            "Judge Name",
+            "Internet-Based Hearing Link",
+            "Access Code",
+            "Court"
+        }
     )
 in
-    AddJudgeCode
+    Final
