@@ -1,1 +1,14 @@
-=LET(s,iCARESInteraction!$J$2:$J$100000,p,iCARESInteraction!$K$2:$K$100000,q,iCARESInteraction!$L$2:$L$100000,x,VSTACK(FILTER(p,(s="Detained")*(p<>""),""),FILTER(q,(s="Detained")*(q<>""),"")),c,UNIQUE(FILTER(x,(x<>"")*(x<>"Disconnected")*(x<>"Hang Up")*(x<>"Hang Up - Interpreter"))),n,MAP(c,LAMBDA(a,SUM(--(x=a)))),TAKE(SORTBY(HSTACK(c,n),n,-1),MIN(20,ROWS(c))))
+=LET(
+ d,caseERO!$G$2:$G$100000,
+ f,caseERO!$H$2:$H$100000,
+ m,IF(ISNUMBER(d),IFERROR(TEXT(d,"yyyy-mm"),""),LEFT(d,7)),
+ cur,TEXT(EDATE(TODAY(),-1),"yyyy-mm"),
+ prev,TEXT(EDATE(TODAY(),-2),"yyyy-mm"),
+ names,UNIQUE(FILTER(f,(f<>"")*((m=cur)+(m=prev)))),
+ old,MAP(names,LAMBDA(x,SUM((f=x)*(m=prev)))),
+ new,MAP(names,LAMBDA(x,SUM((f=x)*(m=cur)))),
+ diff,new-old,
+ pct,IFERROR(diff/old,0),
+ result,HSTACK(names,old,new,diff,pct),
+ FILTER(SORTBY(result,new,-1),SORTBY(diff,new,-1)>0,"No increases found")
+)
