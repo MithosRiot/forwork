@@ -1,1 +1,264 @@
-=LET(d,caseERO!$B$1:$B$30000,f,caseERO!$R$1:$R$30000,m,IFERROR(IF(ISNUMBER(d),TEXT(d,"yyyy-mm"),LEFT(TRIM(d&""),7)),""),cur,TEXT(EDATE(TODAY(),-1),"yyyy-mm"),prev,TEXT(EDATE(TODAY(),-2),"yyyy-mm"),names,UNIQUE(FILTER(f,(f<>"")*((m=cur)+(m=prev)),"")),old,MAP(names,LAMBDA(x,SUM((f=x)*(m=prev)))),new,MAP(names,LAMBDA(x,SUM((f=x)*(m=cur)))),diff,new-old,pct,IFERROR(diff/old,0),result,HSTACK(names,old,new,diff,pct),IFERROR(SORTBY(FILTER(result,diff>0),FILTER(new,diff>0),-1),"No increases found"))
+
+Option Explicit
+
+Sub GenerateDRILReport()
+
+    Dim ws As Worksheet
+    Dim wdApp As Object
+    Dim wdDoc As Object
+    Dim reportMonth As Date
+    Dim previousMonth As Date
+    Dim reportName As String
+    Dim previousName As String
+    Dim outputPath As String
+    Dim r As Long
+    Dim lastRow As Long
+    Dim previousCalls As Double
+    Dim currentCalls As Double
+    Dim pct As Double
+    Dim facility As String
+    Dim included As Long
+    Dim i As Long
+    Dim missingData As Boolean
+
+    On Error GoTo ErrorHandler
+
+    Set ws = ThisWorkbook.Worksheets("Sheet1")
+
+    ' Report on the previous calendar month.
+    reportMonth = DateSerial(Year(Date), Month(Date) - 1, 1)
+    previousMonth = DateSerial(Year(Date), Month(Date) - 2, 1)
+
+    reportName = Format(reportMonth, "mmmm yyyy")
+    previousName = Format(previousMonth, "mmmm yyyy")
+
+    ' Make sure the required Excel results are available.
+    For r = 3 To 7
+        If IsError(ws.Cells(r, "B").Value) Then
+            missingData = True
+        ElseIf Not IsNumeric(ws.Cells(r, "B").Value) Then
+            missingData = True
+        End If
+    Next r
+
+    For r = 9 To 12
+        If IsError(ws.Cells(r, "B").Value) Then
+            missingData = True
+        ElseIf Not IsNumeric(ws.Cells(r, "B").Value) Then
+            missingData = True
+        End If
+    Next r
+
+    If missingData Then
+        MsgBox "Check call totals in Sheet1, column B.", vbExclamation
+        Exit Sub
+    End If
+
+    If IsError(ws.Range("D4").Value) Or _
+       IsError(ws.Range("E4").Value) Then
+        MsgBox "The Significant Issues formula has an error.", vbExclamation
+        Exit Sub
+    End If
+
+    If IsError(ws.Range("G3").Value) Then
+        MsgBox "The facility comparison formula has an error.", vbExclamation
+        Exit Sub
+    End If
+
+    ' Start Microsoft Word.
+    On Error Resume Next
+    Set wdApp = GetObject(, "Word.Application")
+    On Error GoTo ErrorHandler
+
+    If wdApp Is Nothing Then
+        Set wdApp = CreateObject("Word.Application")
+    End If
+
+    wdApp.Visible = True
+    Set wdDoc = wdApp.Documents.Add
+
+    wdApp.Selection.Font.Name = "Times New Roman"
+    wdApp.Selection.Font.Size = 11
+
+    ' DRIL section heading.
+    AddDRILLine wdApp, "DRIL, " & reportName & ":", 0, True
+
+    ' Call totals.
+    AddDRILLine wdApp, _
+        Num(ws.Range("B3").Value) & _
+        " calls to the DRIL (T-Metrics):", 1
+
+    AddDRILLine wdApp, _
+        Num(ws.Range("B4").Value) & _
+        " calls were diverted by Call Tree", 2
+
+    AddDRILLine wdApp, _
+        Num(ws.Range("B5").Value) & _
+        " calls were routed to ECCO Call Analysts:", 2
+
+    AddDRILLine wdApp, _
+        Num(ws.Range("B6").Value) & " answered calls", 3
+
+    AddDRILLine wdApp, _
+        Num(ws.Range("B7").Value) & " abandoned calls", 3
+
+    ' Incoming calls.
+    AddDRILLine wdApp, _
+        Num(ws.Range("B9").Value) & _
+        " incoming calls (calls logged) from:", 1
+
+    AddDRILLine wdApp, _
+        Num(ws.Range("B10").Value) & _
+        " calls from a detention facility", 2
+
+    AddDRILLine wdApp, _
+        Num(ws.Range("B11").Value) & " from the public", 2
+
+    AddDRILLine wdApp, _
+        Num(ws.Range("B12").Value) & " dropped calls", 2
+
+    ' Significant issues: top 10 categories.
+    AddDRILLine wdApp, "Significant Issues:", 1
+
+    For r = 4 To 13
+        If Not IsError(ws.Cells(r, "D").Value) And _
+           Not IsError(ws.Cells(r, "E").Value) Then
+
+            If Len(Trim(CStr(ws.Cells(r, "D").Value))) > 0 _
+                And IsNumeric(ws.Cells(r, "E").Value) Then
+
+                AddDRILLine wdApp, _
+                    "DC: " & ws.Cells(r, "D").Value & _
+                    ": " & Num(ws.Cells(r, "E").Value) & _
+                    " Calls Logged", 2
+
+            End If
+        End If
+    Next r
+
+    ' Facility comparison.
+    ' G = Facility
+    ' H = Previous month
+    ' I = Reporting month
+    ' J = Difference
+    ' K = Percentage change
+
+    lastRow = ws.Cells(ws.Rows.Count, "G").End(xlUp).Row
+    included = 0
+
+    For r = 3 To lastRow
+
+        If Not IsError(ws.Cells(r, "G").Value) And _
+           Not IsError(ws.Cells(r, "H").Value) And _
+           Not IsError(ws.Cells(r, "I").Value) Then
+
+            facility = Trim(CStr(ws.Cells(r, "G").Value))
+
+            If Len(facility) > 0 _
+               And IsNumeric(ws.Cells(r, "H").Value) _
+               And IsNumeric(ws.Cells(r, "I").Value) Then
+
+                previousCalls = CDbl(ws.Cells(r, "H").Value)
+                currentCalls = CDbl(ws.Cells(r, "I").Value)
+
+                pct = 0
+                If previousCalls > 0 Then
+                    pct = (currentCalls - previousCalls) / previousCalls
+                End If
+
+                ' SOP selection guidelines:
+                ' Increased calls, plus current >100 or growth >100%.
+                If currentCalls > previousCalls And _
+                   (currentCalls > 100 Or pct > 1) Then
+
+                    AddDRILLine wdApp, _
+                        UCase(facility) & _
+                        " had an increase in complaints from " & _
+                        Num(previousCalls) & _
+                        " calls logged in " & previousName & _
+                        " to " & Num(currentCalls) & _
+                        " calls logged in " & reportName & ".", 1
+
+                    included = included + 1
+                End If
+
+            End If
+        End If
+
+    Next r
+
+    If included = 0 Then
+        AddDRILLine wdApp, _
+            "No detention facilities met the increase criteria.", 1
+    End If
+
+    ' Save the new Word document beside the Excel workbook.
+    outputPath = ThisWorkbook.Path & Application.PathSeparator & _
+                 "DRIL_Section_" & Format(reportMonth, "yyyy-mm") & _
+                 "_" & Format(Now, "yyyymmdd_hhnnss") & ".docx"
+
+    wdDoc.SaveAs2 outputPath, 16
+
+    MsgBox "DRIL report created successfully!" & vbCrLf & _
+           outputPath, vbInformation
+
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "Report generation stopped: " & Err.Description, _
+           vbExclamation
+
+End Sub
+
+
+Private Sub AddDRILLine(ByVal wdApp As Object, _
+                        ByVal lineText As String, _
+                        ByVal level As Integer, _
+                        Optional ByVal isBold As Boolean = False)
+
+    Dim bulletText As String
+
+    With wdApp.Selection
+
+        .Font.Name = "Times New Roman"
+        .Font.Size = 11
+        .Font.Bold = isBold
+
+        .ParagraphFormat.SpaceBefore = 0
+        .ParagraphFormat.SpaceAfter = 0
+
+        Select Case level
+
+            Case 0
+                bulletText = ""
+                .ParagraphFormat.LeftIndent = 0
+                .ParagraphFormat.FirstLineIndent = 0
+
+            Case 1
+                bulletText = ChrW(9675) & "  "
+                .ParagraphFormat.LeftIndent = 24
+                .ParagraphFormat.FirstLineIndent = -14
+
+            Case 2
+                bulletText = ChrW(8226) & "  "
+                .ParagraphFormat.LeftIndent = 48
+                .ParagraphFormat.FirstLineIndent = -14
+
+            Case Else
+                bulletText = ChrW(8226) & "  "
+                .ParagraphFormat.LeftIndent = 72
+                .ParagraphFormat.FirstLineIndent = -14
+
+        End Select
+
+        .TypeText bulletText & lineText
+        .TypeParagraph
+
+    End With
+
+End Sub
+
+
+Private Function Num(ByVal value As Variant) As String
+    Num = Format(CDbl(value), "#,##0")
+End Function
