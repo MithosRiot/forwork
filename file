@@ -1,17 +1,159 @@
-=LET(
-names,DOJ_All_Judges!B2:B10000,
-missing,judgeWithoutLink!G2:G10000,
-persons,judgeEOIRPersons!A2:A10000,
-judges,judgeEOIRJudges!B2:B10000,
-key,LAMBDA(n,LOWER(TRIM(IFERROR(TEXTBEFORE(TRIM(TEXTAFTER(n,","))," "),TRIM(TEXTAFTER(n,",")))&"|"&IFERROR(TEXTBEFORE(n,","),"")))),
-sourceKey,LOWER(TRIM(IFERROR(TEXTBEFORE(names," "),"")&"|"&IFERROR(TEXTAFTER(names," ",-1),""))),
-result,HSTACK(
-XLOOKUP(sourceKey,key(persons),persons,""),
-DOJ_All_Judges!A2:A10000,
-DOJ_All_Judges!E2:E10000,
-DOJ_All_Judges!F2:F10000,
-DOJ_All_Judges!G2:G10000,
-DOJ_All_Judges!H2:H10000
-),
-FILTER(result,(names<>"")*ISNUMBER(XMATCH(sourceKey,key(missing)))*ISNUMBER(XMATCH(sourceKey,key(persons)))*ISNA(XMATCH(sourceKey,key(judges))),"No matches")
-)
+
+(function executeFixScript() {
+
+    // CONFIGURATION - Developer must verify these values.
+    var CONFIG = {
+        dryRun: true,
+
+        targetTable: 'x_g_dh5_dfas_dfas_eoir_judge_links',
+        judgeTable: 'REPLACE_JUDGE_REFERENCE_TABLE',
+        judgeNameField: 'REPLACE_JUDGE_NAME_FIELD',
+
+        fields: {
+            judge: 'REPLACE_JUDGE_REFERENCE_FIELD',
+            code: 'REPLACE_JUDGE_CODE_FIELD',
+            link: 'REPLACE_HEARING_LINK_FIELD',
+            access: 'REPLACE_ACCESS_CODE_FIELD',
+            court: 'REPLACE_COURT_FIELD',
+            state: 'REPLACE_STATE_FIELD',
+            vav: 'REPLACE_VAV_COURT_FIELD'
+        },
+
+        vavNoValue: 'REPLACE_NO_CHOICE_VALUE'
+    };
+
+    // Data columns:
+    // [Name, Judge Code, Link, Access Code, Court, State]
+    // Paste Excel-generated records here.
+    var rows = [
+        // ["Last, First", "ABC", "https://...", "123 456 7890", "Court", "State"]
+    ];
+
+    function log(message) {
+        gs.info('[EOIR Judge Links Fix] ' + message);
+    }
+
+    function validate() {
+        var target = new GlideRecord(CONFIG.targetTable);
+        var person = new GlideRecord(CONFIG.judgeTable);
+
+        if (!target.isValid() || !person.isValid())
+            throw new Error('Invalid target or judge table');
+
+        if (!person.isValidField(CONFIG.judgeNameField))
+            throw new Error('Invalid judge name field');
+
+        for (var key in CONFIG.fields) {
+            if (!CONFIG.fields.hasOwnProperty(key)) continue;
+            if (!target.isValidField(CONFIG.fields[key]))
+                throw new Error('Invalid field: ' + key);
+        }
+
+        if (target.getElement(CONFIG.fields.judge)
+                  .getED().getInternalType() !== 'reference')
+            throw new Error('Judge field must be a reference');
+
+        if (target.getElement(CONFIG.fields.judge)
+                  .getReferenceTable() !== CONFIG.judgeTable)
+            throw new Error('Judge reference table mismatch');
+
+        if (CONFIG.vavNoValue.indexOf('REPLACE_') === 0)
+            throw new Error('VAV No value not configured');
+
+        if (!rows.length)
+            throw new Error('No Excel records supplied');
+    }
+
+    validate();
+
+    var stats = {
+        inserted: 0,
+        ready: 0,
+        existing: 0,
+        unmatched: 0,
+        ambiguous: 0,
+        invalid: 0,
+        failed: 0
+    };
+
+    for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+
+        if (r.length !== 6 || !r[0] || !r[2]) {
+            stats.invalid++;
+            log('INVALID row ' + (i + 1));
+            continue;
+        }
+
+        var person = new GlideRecord(CONFIG.judgeTable);
+        person.addQuery(CONFIG.judgeNameField, r[0]);
+        person.setLimit(2);
+        person.query();
+
+        if (!person.next()) {
+            stats.unmatched++;
+            log('UNMATCHED: ' + r[0]);
+            continue;
+        }
+
+        var judgeId = person.getUniqueValue();
+
+        if (person.next()) {
+            stats.ambiguous++;
+            log('AMBIGUOUS: ' + r[0]);
+            continue;
+        }
+
+        // Check existing records by judge reference or code.
+        var existing = new GlideRecord(CONFIG.targetTable);
+        var condition = existing.addQuery(
+            CONFIG.fields.judge, judgeId
+        );
+
+        if (r[1]) {
+            condition.addOrCondition(
+                CONFIG.fields.code, r[1]
+            );
+        }
+
+        existing.setLimit(1);
+        existing.query();
+
+        if (existing.hasNext()) {
+            stats.existing++;
+            log('EXISTS: ' + r[0]);
+            continue;
+        }
+
+        if (CONFIG.dryRun) {
+            stats.ready++;
+            log('READY: ' + r[0]);
+            continue;
+        }
+
+        var record = new GlideRecord(CONFIG.targetTable);
+        record.initialize();
+
+        record.setValue(CONFIG.fields.judge, judgeId);
+        record.setValue(CONFIG.fields.code, r[1]);
+        record.setValue(CONFIG.fields.link, r[2]);
+        record.setValue(CONFIG.fields.access, r[3]);
+        record.setValue(CONFIG.fields.court, r[4]);
+        record.setValue(CONFIG.fields.state, r[5]);
+        record.setValue(CONFIG.fields.vav, CONFIG.vavNoValue);
+
+        var insertedId = record.insert();
+
+        if (insertedId) {
+            stats.inserted++;
+            log('INSERTED: ' + r[0] + ' / ' + insertedId);
+        } else {
+            stats.failed++;
+            log('FAILED: ' + r[0]);
+        }
+    }
+
+    log('SUMMARY: ' + JSON.stringify(stats));
+    log(CONFIG.dryRun ? 'DRY RUN COMPLETE' : 'INSERT COMPLETE');
+
+})();
