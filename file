@@ -1,1 +1,17 @@
-=LET(source,DOJ_All_Judges!A2:H10000,names,DOJ_All_Judges!B2:B10000,missing,judgeWithoutLink!G2:G10000,persons,judgeEOIRPersons!A2:A10000,judges,judgeEOIRJudges!B2:B10000,key,LAMBDA(n,LOWER(TRIM(IFERROR(TEXTBEFORE(TRIM(TEXTAFTER(n,","))," "),TRIM(TEXTAFTER(n,",")))&"|"&IFERROR(TEXTBEFORE(n,","),"")))),sourceKey,LOWER(TRIM(IFERROR(TEXTBEFORE(names," "),"")&"|"&IFERROR(TEXTAFTER(names," ",-1),""))),FILTER(source,(names<>"")*ISNUMBER(XMATCH(sourceKey,key(missing)))*ISNUMBER(XMATCH(sourceKey,key(persons)))*ISNA(XMATCH(sourceKey,key(judges))),"No matches"))
+=LET(
+names,DOJ_All_Judges!B2:B10000,
+missing,judgeWithoutLink!G2:G10000,
+persons,judgeEOIRPersons!A2:A10000,
+judges,judgeEOIRJudges!B2:B10000,
+key,LAMBDA(n,LOWER(TRIM(IFERROR(TEXTBEFORE(TRIM(TEXTAFTER(n,","))," "),TRIM(TEXTAFTER(n,",")))&"|"&IFERROR(TEXTBEFORE(n,","),"")))),
+sourceKey,LOWER(TRIM(IFERROR(TEXTBEFORE(names," "),"")&"|"&IFERROR(TEXTAFTER(names," ",-1),""))),
+result,HSTACK(
+XLOOKUP(sourceKey,key(persons),persons,""),
+DOJ_All_Judges!A2:A10000,
+DOJ_All_Judges!E2:E10000,
+DOJ_All_Judges!F2:F10000,
+DOJ_All_Judges!G2:G10000,
+DOJ_All_Judges!H2:H10000
+),
+FILTER(result,(names<>"")*ISNUMBER(XMATCH(sourceKey,key(missing)))*ISNUMBER(XMATCH(sourceKey,key(persons)))*ISNA(XMATCH(sourceKey,key(judges))),"No matches")
+)
